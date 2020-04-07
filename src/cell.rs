@@ -106,7 +106,6 @@ pub struct Cell {
     pub format: Format,
     pub width: Width,
     pub byte_order: ByteOrder,
-    pub selected: bool,
 }
 
 impl Cell {
@@ -117,7 +116,6 @@ impl Cell {
             format,
             width,
             byte_order,
-            selected: false,
         }
     }
 

@@ -18,12 +18,12 @@ fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>, data: &mut [u8]) {
         Key::Char(c) if editor.mode == EditorMode::Insert => editor.insert(c, data),
         Key::Char(':') => editor.set_mode(EditorMode::Command),
         Key::Char('i') => editor.set_mode(EditorMode::Insert),
-        Key::Right | Key::Char('l') => editor.move_cursor(1, 0),
-        Key::Left | Key::Char('h') => editor.move_cursor(-1, 0),
-        Key::Down | Key::Char('j') => editor.move_cursor(0, 1),
-        Key::Up | Key::Char('k') => editor.move_cursor(0, -1),
-        Key::PageDown => editor.move_cursor(0, editor.height as isize),
-        Key::PageUp => editor.move_cursor(0, -(editor.height as isize)),
+        Key::Right | Key::Char('l') => editor.move_cursor_x(1),
+        Key::Left | Key::Char('h') => editor.move_cursor_x(-1),
+        Key::Down | Key::Char('j') => editor.move_cursor_y(1),
+        Key::Up | Key::Char('k') => editor.move_cursor_y(-1),
+        Key::PageDown => editor.move_cursor_y(editor.height as isize),
+        Key::PageUp => editor.move_cursor_y(-(editor.height as isize)),
         Key::Home => editor.set_cursor(0, 0),
         Key::End => editor.set_cursor_end(),
         Key::Char('f') => editor.switch_format(false),
@@ -49,7 +49,7 @@ fn main() -> Result<(), io::Error> {
 
     //let path = env::args().nth(1).expect("Missing filename.");
     //let mut file = fs::File::open(path)?;
-    let mut data = [0x00_u8; 2560];
+    let mut data = [0x00_u8; 160];
 
     let stdout = stdout().into_raw_mode()?;
     let (_width, height) = termion::terminal_size()?;

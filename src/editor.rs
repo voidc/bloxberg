@@ -155,7 +155,7 @@ impl<W: Write> Editor<W> {
 
     pub fn init(&mut self, data: &[u8]) {
         self.write(format_args!("{}{}", termion::clear::All, termion::cursor::Hide));
-        self.move_cursor(0, 0);
+        self.set_cursor(0, 0);
         self.draw(&data);
     }
 
@@ -175,12 +175,12 @@ impl<W: Write> Editor<W> {
         self.lines[self.cursor_y].cell_at_col_mut(self.cursor_x)
     }
 
-    pub fn move_cursor(&mut self, dx: isize, dy: isize) {
+    pub fn move_cursor_x(&mut self, dx: isize) {
         let line = &self.lines[self.cursor_y];
         let cell_idx = line.col_to_index(self.cursor_x);
 
         let mut new_cell_idx = cell_idx as isize + dx;
-        let mut new_y = self.cursor_y as isize + dy;
+        let mut new_y = self.cursor_y as isize;
 
         if new_cell_idx < 0 {
             if self.cursor_y > 0 {
@@ -198,21 +198,28 @@ impl<W: Write> Editor<W> {
             }
         }
 
+        let new_x = self.lines[new_y as usize].cells[new_cell_idx as usize].col;
+        self.set_cursor(new_x, new_y as usize);
+    }
+
+    pub fn move_cursor_y(&mut self, dy: isize) {
+        let mut new_y = self.cursor_y as isize + dy;
+
         if new_y < 0 {
             new_y = 0;
         } else if new_y >= self.lines.len() as isize {
             new_y = (self.lines.len() - 1) as isize;
         }
 
-        self.set_cursor(self.lines[new_y as usize].cells[new_cell_idx as usize].col, new_y as usize);
+        self.set_cursor(self.cursor_x, new_y as usize);
     }
 
     pub fn set_cursor(&mut self, x: usize, y: usize) {
         self.cursor_offset = 0;
-        self.cell_at_cursor_mut().selected = false;
+        //self.cell_at_cursor_mut().selected = false;
         self.cursor_x = x;
         self.cursor_y = y;
-        self.cell_at_cursor_mut().selected = true;
+        //self.cell_at_cursor_mut().selected = true;
 
         if y < self.scroll {
             self.scroll = y;
@@ -301,7 +308,7 @@ impl<W: Write> Editor<W> {
                 line.cells.insert(cell_idx + i, new_cell)
             }
         }
-        self.cell_at_cursor_mut().selected = true;
+        //self.cell_at_cursor_mut().selected = true;
     }
 
     pub fn insert(&mut self, c: char, data: &mut [u8]) {
@@ -319,7 +326,7 @@ impl<W: Write> Editor<W> {
         } else if self.cursor_offset == 1 {
             data[cell.offset] = (old & 0xf0) | new;
             self.cursor_offset = 0;
-            self.move_cursor(1, 0);
+            self.move_cursor_x(1);
         }
 
         self.dirty = true;
@@ -358,20 +365,51 @@ impl<W: Write> Editor<W> {
         }
     }
 
-    fn draw_cell(&self, cell: &Cell, min_cols: usize, data: &[u8]) {
+    fn escape_non_printable(chr: char) -> char {
+        match chr {
+            // line feed
+            '\x0A' => '␊',
+            // carriage return
+            '\x0D' => '␍',
+            // null
+            '\x00' => '␀',
+            // bell
+            '\x07' => '␇',
+            // backspace
+            '\x08' => '␈',
+            // escape
+            '\x1B' => '␛',
+            // tab
+            '\t' => '↹',
+            // space
+            _ => '•',
+        }
+    }
+
+    fn draw_cell(&self, cell: &Cell, selected: bool, min_cols: usize, data: &[u8]) {
+        fn value_to_char(value: u128) -> Option<char> {
+            let c = char::from_u32(value as u32)?;
+            if c.is_ascii() && !c.is_ascii_control() {
+                Some(c)
+            } else {
+                None
+            }
+        }
+
         assert!(data.len() >= cell.n_bytes());
         self.write(format_args!(" "));
 
-        if cell.selected {
+        if selected {
             self.write(format_args!("{}", termion::color::Bg(termion::color::LightBlue)));
         }
 
         let cell_width = max(cell.n_cols(), min_cols) * 3 - 1;
         let value = cell.parse_value(data);
+        let value_char = value_to_char(value);
 
         if value == 0 {
             self.write(format_args!("{}", termion::color::Fg(termion::color::LightBlack)));
-        } else if (value as u8).is_ascii() {
+        } else if value_char.is_some() {
             self.write(format_args!("{}", termion::color::Fg(termion::color::Yellow)));
         }
 
@@ -395,11 +433,7 @@ impl<W: Write> Editor<W> {
                 self.write(format_args!("{1:2$}{:03$b}", value, "", cell_width - w, w));
             }
             Format::Char => {
-                let mut c = char::from_u32(value as u32).unwrap_or('.');
-                if !c.is_ascii() || c.is_ascii_control() {
-                    c = '.';
-                }
-                self.write(format_args!("{:>1$}", c, cell_width));
+                self.write(format_args!("{:>1$}", value_char.unwrap_or('.'), cell_width));
             }
         }
 
@@ -439,6 +473,10 @@ impl<W: Write> Editor<W> {
         }
     }
 
+    fn draw_line_ascii(&self, data: &[u8]) {
+        self.write(format_args!(" {}", String::from_utf8_lossy(data)));
+    }
+
     pub fn draw(&mut self, data: &[u8]) {
         self.write(format_args!("{}", termion::clear::All));
         self.draw_header();
@@ -468,7 +506,7 @@ impl<W: Write> Editor<W> {
 
             let mut col = 0;
             let mut j = 0;
-            while col < N_COLS {
+            while col < N_COLS || j < self.lines[i].cells.len() {
                 if j >= self.lines[i].cells.len() {
                     if i+1 < self.lines.len() {
                         let c = self.lines[i+1].cells.remove(0);
@@ -486,10 +524,12 @@ impl<W: Write> Editor<W> {
                 self.lines[i].cells[j].col = col;
 
                 let cell = self.lines[i].cells[j];
-                col += max(cell.n_cols(), self.lines[i].min_cpb * cell.n_bytes());
+                let n_cols = max(cell.n_cols(), self.lines[i].min_cpb * cell.n_bytes());
+                let selected = self.cursor_y == i && col <= self.cursor_x && self.cursor_x < col + n_cols;
+                col += n_cols;
 
-                if col > N_COLS && j+1 < self.lines[i].cells.len() {
-                    let mut new_line = Line::new(offset, 1, self.lines[i].cells.split_off(j+1));
+                if col > N_COLS {
+                    let mut new_line = Line::new(offset, 1, self.lines[i].cells.split_off(j));
                     if i == self.lines.len() - 1 {
                         new_line.min_cpb = new_line.cells.iter().map(|c| c.format.cols_per_byte()).max().unwrap();
                         self.lines.push(new_line);
@@ -498,13 +538,18 @@ impl<W: Write> Editor<W> {
                         new_line.min_cpb = new_line.cells.iter().map(|c| c.format.cols_per_byte()).max().unwrap();
                         self.lines[i + 1] = new_line;
                     }
+                    if self.cursor_x >= cell.col {
+                        self.cursor_y += 1
+                    }
                     break;
                 }
 
-                self.draw_cell(&cell, self.lines[i].min_cpb * cell.n_bytes(), &data[offset..]);
+                self.draw_cell(&cell, selected, self.lines[i].min_cpb * cell.n_bytes(), &data[offset..]);
                 offset += cell.n_bytes();
                 j += 1;
             }
+
+            self.draw_line_ascii(&data[self.lines[i].offset..offset]);
 
             i += 1;
         }
