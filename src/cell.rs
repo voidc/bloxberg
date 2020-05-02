@@ -1,6 +1,5 @@
 use std::convert::TryInto;
 use std::ops::Range;
-use std::mem::size_of;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Format {
