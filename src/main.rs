@@ -14,18 +14,20 @@ mod util;
 fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>, data: &mut [u8]) {
     match key {
         Key::Esc => editor.set_mode(EditorMode::Normal),
-        Key::Char(c) if editor.mode == EditorMode::Command => editor.type_cmd(c),
-        Key::Char(c) if editor.mode == EditorMode::Insert => editor.insert(c, data),
+        Key::Char(c) if editor.is_cmd() => editor.type_cmd(c),
+        Key::Backspace if editor.is_cmd() => editor.type_cmd('\x08'),
+        Key::Char(c) if editor.is_ins() => editor.insert(c, data),
         Key::Char(':') => editor.set_mode(EditorMode::Command),
         Key::Char('i') => editor.set_mode(EditorMode::Insert),
-        Key::Right | Key::Char('l') => editor.move_cursor_x(1),
-        Key::Left | Key::Char('h') => editor.move_cursor_x(-1),
+        Key::Right | Key::Char('l') => editor.move_cursor_next(),
+        Key::Left | Key::Char('h') => editor.move_cursor_prev(),
         Key::Down | Key::Char('j') => editor.move_cursor_y(1),
         Key::Up | Key::Char('k') => editor.move_cursor_y(-1),
         Key::PageDown => editor.move_cursor_y(editor.height as isize),
         Key::PageUp => editor.move_cursor_y(-(editor.height as isize)),
         Key::Home => editor.set_cursor(0, 0),
         Key::End => editor.set_cursor_end(),
+        Key::Char('p') => editor.follow_pointer(data),
         Key::Char('f') => editor.switch_format(false),
         Key::Char('F') => editor.switch_format(true),
         Key::Char('x') => editor.set_format(Format::Hex),
@@ -36,6 +38,7 @@ fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>, data: &mut [u8]) {
         Key::Char('-') => editor.dec_width(),
         Key::Char('b') => editor.set_width(Width::Byte8),
         Key::Char('w') => editor.set_width(Width::Word32),
+        Key::Char('a') => editor.set_width(Width::Address),
         Key::Char('q') => editor.finished = true,
         _ => {}
     }

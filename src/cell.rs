@@ -1,4 +1,6 @@
 use std::convert::TryInto;
+use std::ops::Range;
+use std::mem::size_of;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Format {
@@ -48,6 +50,9 @@ pub enum Width {
 }
 
 impl Width {
+    #[cfg(target_pointer_width = "64")]
+    pub const Address: Width = Width::DWord64;
+
     pub fn n_bytes(&self) -> usize {
         match &self {
             Width::Byte8 => 1,
@@ -59,7 +64,13 @@ impl Width {
     }
 
     pub fn align(&self, n: usize) -> usize {
-        let shift = self.n_bytes() - 1;
+        let shift = match &self {
+            Width::Byte8 => 0,
+            Width::HWord16 => 1,
+            Width::Word32 => 2,
+            Width::DWord64 => 3,
+            Width::QWord128 => 4,
+        };
         (n >> shift) << shift
     }
 
@@ -127,8 +138,16 @@ impl Cell {
         self.width.n_bytes()
     }
 
+    pub fn byte_range(&self) -> Range<usize> {
+        self.offset..(self.offset+self.n_bytes())
+    }
+
     pub fn n_cols(&self) -> usize {
         self.format.cols_per_byte() * self.n_bytes()
+    }
+
+    pub fn base_offset(&self) -> usize {
+        self.width.align(self.offset)
     }
 
     pub fn parse_value(&self, data: &[u8]) -> u128 {

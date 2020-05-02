@@ -5,113 +5,35 @@ use std::cmp::{min, max};
 
 use crate::cell::*;
 use std::cell::RefCell;
-use crate::util::{cmp_range, UtilExt, either};
+use crate::util::cmp_range;
+use std::ops::Range;
+use std::mem::size_of;
 
 const N_COLS: usize = 16;
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
 
-/* Strategy 1: Unaligned, Free flow
- * - arbitrary line offsets,
- * - underfull lines (long cell at the end)
- *
- * Strategy 2: Aligned, padded cells
- * - fixed cell width per line (max cols of cells)
- * - padded cells
- * - split lines if cell size inc, merge if dec
- */
-
-
-
 struct Line {
     offset: usize,
-    min_cpb: usize,
-    cells: Vec<Cell>,
+    len: usize,
+    cpb: usize,
 }
 
 impl Line {
-    fn new(offset: usize, min_cpb: usize, cells: Vec<Cell>) -> Self {
+    fn new(offset: usize, len: usize, cpb: usize) -> Self {
         Line {
             offset,
-            min_cpb,
-            cells,
+            len,
+            cpb,
         }
     }
 
-    fn empty(offset: usize, n_bytes: usize) -> Self {
-        let mut cells = Vec::new();
-        for i in 0..n_bytes {
-            cells.push(Cell::new_hex(offset + i, i))
-        }
-
-        Self::new(offset, 1, cells)
+    fn cell_range(&self) -> Range<usize> {
+        self.offset..self.offset+self.len
     }
 
-    fn empty_vec(n_bytes: usize) -> Vec<Self> {
-        let mut offset = 0;
-        let mut vec = Vec::new();
-        while offset < n_bytes {
-            let b = min(n_bytes - offset, N_COLS);
-            vec.push(Line::empty(offset, b));
-            offset += b;
-        }
-
-        vec
-    }
-
-    fn cell_at_col(&self, col: usize) -> &Cell {
-        let i = self.col_to_index(col);
-        &self.cells[i]
-    }
-
-    fn cell_at_col_mut(&mut self, col: usize) -> &mut Cell {
-        let i = self.col_to_index(col);
-        &mut self.cells[i]
-    }
-
-    fn cell_at_offset(&self, offset: usize) -> &Cell {
-        let i = self.offset_to_index(offset);
-        &self.cells[i]
-    }
-
-    fn cell_at_offset_mut(&mut self, offset: usize) -> &mut Cell {
-        let i = self.offset_to_index(offset);
-        &mut self.cells[i]
-    }
-
-    fn cell_cols(&self, cell_idx: usize) -> usize {
-        let cell = &self.cells[cell_idx];
-        max(self.min_cpb * cell.n_bytes(), cell.n_cols())
-    }
-
-    fn col_to_index(&self, col: usize) -> usize {
-        // self.cells.binary_search_by(|cell| {
-        //     let cols = max(self.min_cpb * cell.n_bytes(), cell.n_cols());
-        //     cmp_range(col, cell.col..(cell.col + cols))
-        // }).apply(either)
-        let mut x = 0;
-        let mut i = 0;
-        loop {
-            x += self.cell_cols(i);
-            i += 1;
-            if x > col || i >= self.cells.len() {
-                break;
-            }
-        }
-        return i - 1;
-    }
-
-    fn offset_to_index(&self, offset: usize) -> usize {
-        let mut x = self.offset;
-        let mut i = 0;
-        loop {
-            x += self.cells[i].n_bytes();
-            i += 1;
-            if x > offset || i >= self.cells.len() {
-                break;
-            }
-        }
-        return i - 1;
+    fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 
@@ -125,11 +47,12 @@ pub enum EditorMode {
 pub struct Editor<W: Write> {
     stdout: RefCell<W>,
     pub height: usize,
-    pub mode: EditorMode,
+    mode: EditorMode,
     scroll: usize,
     cursor_x: usize,
     cursor_y: usize,
     cursor_offset: usize,
+    cells: Vec<Cell>,
     lines: Vec<Line>,
     cmd_buf: String,
     pub finished: bool,
@@ -138,6 +61,13 @@ pub struct Editor<W: Write> {
 
 impl<W: Write> Editor<W> {
     pub fn new(stdout: W, height: usize, n_bytes: usize) -> Self {
+        let cells = (0..n_bytes)
+            .map(|i| Cell::new_hex(i, i % N_COLS))
+            .collect::<Vec<Cell>>();
+        let lines = cells.chunks(N_COLS)
+            .map(|c| Line::new(c[0].offset, c.len(), 1))
+            .collect::<Vec<Line>>();
+
         Editor {
             stdout: RefCell::new(stdout),
             height: height - PADDING_TOP - PADDING_BOTTOM,
@@ -146,7 +76,8 @@ impl<W: Write> Editor<W> {
             cursor_x: 0,
             cursor_y: 0,
             cursor_offset: 0,
-            lines: Line::empty_vec(n_bytes),
+            cells,
+            lines,
             cmd_buf: String::new(),
             finished: false,
             dirty: false,
@@ -163,43 +94,92 @@ impl<W: Write> Editor<W> {
         self.mode = mode;
     }
 
+    pub fn is_cmd(&self) -> bool {
+        self.mode == EditorMode::Command
+    }
+
+    pub fn is_ins(&self) -> bool {
+        self.mode == EditorMode::Insert
+    }
+
     pub fn write(&self, args: fmt::Arguments) {
         self.stdout.borrow_mut().write_fmt(args).unwrap();
     }
 
+    fn cells(&self, line_idx: usize) -> &[Cell] {
+        &self.cells[self.lines[line_idx].cell_range()]
+    }
+
+    fn cells_mut(&mut self, line_idx: usize) -> &mut [Cell] {
+        &mut self.cells[self.lines[line_idx].cell_range()]
+    }
+
+    fn cell_index_at_col(&self, line_idx: usize, col: usize) -> Option<usize> {
+        let idx = self.lines[line_idx].offset + col / self.lines[line_idx].cpb;
+        Some(self.cells.get(idx)?.base_offset())
+    }
+
+    fn cell_index_at_cursor(&self) -> usize {
+        self.cell_index_at_col(self.cursor_y, self.cursor_x).unwrap()
+    }
+
+    fn cell_at_col(&self, line_idx: usize, col: usize) -> Option<&Cell> {
+        Some(&self.cells[self.cell_index_at_col(line_idx, col)?])
+    }
+
+    fn cell_at_col_mut(&mut self, line_idx: usize, col: usize) -> Option<&mut Cell> {
+        let idx = self.cell_index_at_col(line_idx, col)?;
+        Some(&mut self.cells[idx])
+    }
+
     fn cell_at_cursor(&self) -> &Cell {
-        self.lines[self.cursor_y].cell_at_col(self.cursor_x)
+        self.cell_at_col(self.cursor_y, self.cursor_x).unwrap()
     }
 
     fn cell_at_cursor_mut(&mut self) -> &mut Cell {
-        self.lines[self.cursor_y].cell_at_col_mut(self.cursor_x)
+        self.cell_at_col_mut(self.cursor_y, self.cursor_x).unwrap()
     }
 
-    pub fn move_cursor_x(&mut self, dx: isize) {
+    pub fn move_cursor_next(&mut self) {
         let line = &self.lines[self.cursor_y];
-        let cell_idx = line.col_to_index(self.cursor_x);
+        let cell = self.cell_at_cursor();
 
-        let mut new_cell_idx = cell_idx as isize + dx;
-        let mut new_y = self.cursor_y as isize;
+        let mut new_cell_idx = cell.offset + cell.n_bytes();
+        let mut new_y = self.cursor_y;
 
-        if new_cell_idx < 0 {
+        if new_cell_idx >= line.offset + line.len {
+            if self.cursor_y < self.lines.len() - 1 {
+                new_y += 1;
+            } else {
+                new_cell_idx = self.cells.len() - 1;
+            }
+        }
+
+        let new_x = self.cells[new_cell_idx].col; //?
+        self.set_cursor(new_x, new_y);
+    }
+
+    pub fn move_cursor_prev(&mut self) {
+        let line = &self.lines[self.cursor_y];
+        let cell = self.cell_at_cursor();
+
+        if cell.offset < 1 {
+            return;
+        }
+
+        let mut new_cell_idx = self.cells[cell.offset - 1].base_offset();
+        let mut new_y = self.cursor_y;
+
+        if new_cell_idx < line.offset {
             if self.cursor_y > 0 {
-                new_cell_idx = (self.lines[self.cursor_y - 1].cells.len() - 1) as isize;
                 new_y -= 1;
             } else {
                 new_cell_idx = 0;
             }
-        } else if new_cell_idx >= line.cells.len() as isize {
-            if self.cursor_y < self.lines.len() - 1 {
-                new_cell_idx = 0;
-                new_y += 1;
-            } else {
-                new_cell_idx = (line.cells.len() - 1) as isize;
-            }
         }
 
-        let new_x = self.lines[new_y as usize].cells[new_cell_idx as usize].col;
-        self.set_cursor(new_x, new_y as usize);
+        let new_x = self.cells[new_cell_idx].col;
+        self.set_cursor(new_x, new_y);
     }
 
     pub fn move_cursor_y(&mut self, dy: isize) {
@@ -214,12 +194,26 @@ impl<W: Write> Editor<W> {
         self.set_cursor(self.cursor_x, new_y as usize);
     }
 
+    pub fn set_cursor_offset(&mut self, offset: usize) -> Result<(), usize> {
+        let line_idx = self.lines.binary_search_by(|line| { // FIXME
+            cmp_range(offset, line.cell_range())
+        })?;
+        let col = self.cells[offset].col;
+        //let col = (offset - self.lines[line_idx].offset) * self.lines[line_idx].min_cpb;
+        self.set_cursor(line_idx, col);
+        Ok(())
+    }
+
+    pub fn set_cursor_end(&mut self) {
+        let y = self.lines.len() - 1;
+        let x = self.cells.last().unwrap().col;
+        self.set_cursor(x, y);
+    }
+
     pub fn set_cursor(&mut self, x: usize, y: usize) {
         self.cursor_offset = 0;
-        //self.cell_at_cursor_mut().selected = false;
         self.cursor_x = x;
         self.cursor_y = y;
-        //self.cell_at_cursor_mut().selected = true;
 
         if y < self.scroll {
             self.scroll = y;
@@ -228,38 +222,23 @@ impl<W: Write> Editor<W> {
         }
     }
 
-    pub fn set_cursor_end(&mut self) {
-        let y = self.lines.len() - 1;
-        let x = self.lines[y].cells.last().unwrap().col;
-        self.set_cursor(x, y);
-    }
-
     pub fn switch_format(&mut self, rev: bool) {
         self.set_format(self.cell_at_cursor().format.cycle(rev));
     }
 
     pub fn set_format(&mut self, format: Format) {
-        let line = &mut self.lines[self.cursor_y];
-        let cell_idx = line.col_to_index(self.cursor_x);
-        if line.cells[cell_idx].format == format
-            || line.cells[cell_idx].n_bytes() * format.cols_per_byte() > N_COLS {
+        let cell = self.cell_at_cursor_mut();
+        if cell.format == format || cell.n_bytes() * format.cols_per_byte() > N_COLS {
             return;
         }
+        cell.format = format;
 
-        line.cells[cell_idx].format = format;
-        line.min_cpb = line.cells.iter().map(|c| c.format.cols_per_byte()).max().unwrap();
-
-        //fixed cell size
-        // let cpc = line.cols_per_cell;
-        // let max_cols = line.cells.iter().map(Cell::n_cols).max().unwrap();
-        // if max_cols > line.cols_per_cell {
-        //     let new_line = Line::new(line.offset, cpc * 2, line.cells.split_off(line.cells.len() / 2));
-        //     self.lines.insert(self.cursor_y, new_line);
-        //     //split l2(max_cols) - l2(cpc) times
-        // } else if max_cols < line.cols_per_cell {
-        //     //merge
-        // }
-        // line.cols_per_cell = max_cols;
+        let max_cpb = self.cells(self.cursor_y).iter()
+            .map(|c| c.format.cols_per_byte())
+            .max()
+            .unwrap();
+        self.lines[self.cursor_y].cpb = max_cpb;
+        // TODO: move cursor
     }
 
     pub fn switch_byte_order(&mut self) {
@@ -276,39 +255,19 @@ impl<W: Write> Editor<W> {
     }
 
     pub fn set_width(&mut self, width: Width) {
-        let line = &mut self.lines[self.cursor_y];
-        let cell_idx = line.col_to_index(self.cursor_x);
-        if line.cells[cell_idx].width == width
-            || width.n_bytes() * line.cells[cell_idx].format.cols_per_byte() > N_COLS {
+        let old_cell = self.cell_at_cursor().clone();
+        if old_cell.width == width || width.n_bytes() * old_cell.format.cols_per_byte() > N_COLS {
             return;
         }
 
-        let cell = line.cells.remove(cell_idx);
+        let offset = width.align(old_cell.offset);
+        let n_bytes = max(width.n_bytes(), old_cell.n_bytes());
 
-        let old_w = cell.n_bytes();
-        let new_w = width.n_bytes();
-        if old_w < new_w {
-            //merge
-            let o = width.align(cell.offset);
-            let i = line.offset_to_index(o);
-            let col = line.cells[i].col;
-            while i < line.cells.len() && line.cells[i].offset < o + new_w {
-                line.cells.remove(i);
-            }
-            //line.cells.retain(|c| !r.contains(&c.offset));
-            let new_cell = Cell::new(o, col, cell.format, width, cell.byte_order);
-            line.cells.insert(i, new_cell);
-        } else if old_w > new_w {
-            //split
-            let cols_per_cell = max(cell.format.cols_per_byte() * new_w, line.min_cpb * new_w);
-            for i in 0..(old_w / new_w) {
-                let o = cell.offset + i * new_w;
-                let col = cell.col + i * cols_per_cell;
-                let new_cell = Cell::new(o, col, cell.format, width, cell.byte_order);
-                line.cells.insert(cell_idx + i, new_cell)
-            }
+        for cell in self.cells[offset..(offset + n_bytes)].iter_mut() {
+            cell.width = width;
+            cell.format = old_cell.format;
+            cell.byte_order = old_cell.byte_order;
         }
-        //self.cell_at_cursor_mut().selected = true;
     }
 
     pub fn insert(&mut self, c: char, data: &mut [u8]) {
@@ -326,10 +285,19 @@ impl<W: Write> Editor<W> {
         } else if self.cursor_offset == 1 {
             data[cell.offset] = (old & 0xf0) | new;
             self.cursor_offset = 0;
-            self.move_cursor_x(1);
+            self.move_cursor_next();
         }
 
         self.dirty = true;
+    }
+
+    pub fn follow_pointer(&mut self, data: &[u8]) {
+        let cell = self.cell_at_cursor();
+        if cell.width.n_bytes() != size_of::<usize>() {
+            return;
+        }
+        let offset = cell.parse_value(&data[cell.offset..]) as usize;
+        self.set_cursor_offset(offset);
     }
 
     pub fn type_cmd(&mut self, c: char) {
@@ -337,10 +305,18 @@ impl<W: Write> Editor<W> {
             match &self.cmd_buf[..] {
                 "w" => self.dirty = false,
                 "q" => self.finished = true,
-                cmd => eprintln!("Command: \"{}\"", cmd),
+                cmd => {
+                    if let Ok(offset) = usize::from_str_radix(cmd, 16) {
+                        self.set_cursor_offset(offset);
+                    } else {
+                        eprintln!("Unknown Command: \"{}\"", cmd)
+                    }
+                },
             }
             self.cmd_buf.clear();
             self.mode = EditorMode::Normal;
+        } else if c == '\x08' {
+            self.cmd_buf.pop();
         } else {
             self.cmd_buf.push(c);
         }
@@ -446,7 +422,7 @@ impl<W: Write> Editor<W> {
     fn draw_header(&self) {
         self.goto(1, 1);
         self.write(format_args!("{0:1$}", "", 18));
-        let cpb = self.lines[self.cursor_y].min_cpb;
+        let cpb = self.lines[self.cursor_y].cpb;
         for i in 0..(N_COLS / cpb) {
             if self.cursor_x / cpb == i {
                 self.write(format_args!(" {}{3:4$}{:02x}{}",
@@ -485,7 +461,7 @@ impl<W: Write> Editor<W> {
 
         let mut i = self.scroll;
         while i < min(self.lines.len(), self.scroll + self.height) {
-            if self.lines[i].cells.is_empty() {
+            if self.lines[i].cell_range().end <= offset {
                 self.lines.remove(i);
                 continue;
             }
@@ -495,61 +471,29 @@ impl<W: Write> Editor<W> {
 
             self.lines[i].offset = offset;
 
-            // let next_line = self.lines.iter()
-            //     .skip(i)
-            //     .flat_map(|l| l.cells)
-            //     .take_while(|c| {
-            //         x += max(c.n_cols(), self.lines[i].min_cpb * c.n_bytes());
-            //         x < N_COLS
-            //     })
-            //     .collect::<Vec<Cell>>();
-
             let mut col = 0;
-            let mut j = 0;
-            while col < N_COLS || j < self.lines[i].cells.len() {
-                if j >= self.lines[i].cells.len() {
-                    if i+1 < self.lines.len() {
-                        let c = self.lines[i+1].cells.remove(0);
-                        self.lines[i].cells.push(c);
+            while col < N_COLS && offset < self.cells.len() {
+                self.cells[offset].col = col; //?
 
-                        if self.lines[i+1].cells.is_empty() {
-                            self.lines.remove(i+1);
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                self.lines[i].cells[j].offset = offset;
-                self.lines[i].cells[j].col = col;
-
-                let cell = self.lines[i].cells[j];
-                let n_cols = max(cell.n_cols(), self.lines[i].min_cpb * cell.n_bytes());
+                let cell = self.cells[offset];
+                let n_cols = max(cell.n_cols(), self.lines[i].cpb * cell.n_bytes());
                 let selected = self.cursor_y == i && col <= self.cursor_x && self.cursor_x < col + n_cols;
                 col += n_cols;
 
                 if col > N_COLS {
-                    let mut new_line = Line::new(offset, 1, self.lines[i].cells.split_off(j));
-                    if i == self.lines.len() - 1 {
-                        new_line.min_cpb = new_line.cells.iter().map(|c| c.format.cols_per_byte()).max().unwrap();
-                        self.lines.push(new_line);
-                    } else {
-                        new_line.cells.append(&mut self.lines[i + 1].cells);
-                        new_line.min_cpb = new_line.cells.iter().map(|c| c.format.cols_per_byte()).max().unwrap();
-                        self.lines[i + 1] = new_line;
-                    }
+                    // TODO: add line if last line
                     if self.cursor_x >= cell.col {
                         self.cursor_y += 1
                     }
                     break;
                 }
 
-                self.draw_cell(&cell, selected, self.lines[i].min_cpb * cell.n_bytes(), &data[offset..]);
+                self.draw_cell(&cell, selected, self.lines[i].cpb * cell.n_bytes(), &data[offset..]);
                 offset += cell.n_bytes();
-                j += 1;
             }
 
-            self.draw_line_ascii(&data[self.lines[i].offset..offset]);
+            self.lines[i].len = offset - self.lines[i].offset;
+            self.draw_line_ascii(&data[self.lines[i].cell_range()]);
 
             i += 1;
         }

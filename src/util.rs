@@ -17,13 +17,6 @@ pub fn cmp_range<T: Ord>(x: T, r: Range<T>) -> Ordering {
     }
 }
 
-pub fn either<T>(res: Result<T, T>) -> T {
-    match res {
-        Ok(t) => t,
-        Err(t) => t,
-    }
-}
-
 pub trait UtilExt {
     fn apply<F, R>(self, f: F) -> R
         where
