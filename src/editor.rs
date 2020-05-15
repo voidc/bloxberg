@@ -20,6 +20,7 @@ struct Line {
     cpb: usize,
     min_cpb: usize,
     buddy: Buddy,
+    level: usize,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -30,13 +31,21 @@ enum Buddy {
 }
 
 impl Line {
-    fn new(offset: usize, len: usize, cpb: usize, min_cpb: usize, buddy: Buddy) -> Self {
+    fn new(
+        offset: usize,
+        len: usize,
+        cpb: usize,
+        min_cpb: usize,
+        buddy: Buddy,
+        level: usize,
+    ) -> Self {
         Line {
             offset,
             len,
             cpb,
             min_cpb,
             buddy,
+            level,
         }
     }
 
@@ -77,7 +86,7 @@ impl<W: Write> Editor<W> {
             .map(|i| Cell::new_hex(i, i % N_COLS))
             .collect::<Vec<Cell>>();
         let lines = cells.chunks(N_COLS)
-            .map(|c| Line::new(c[0].offset, c.len(), 1, 1, Buddy::None))
+            .map(|c| Line::new(c[0].offset, c.len(), 1, 1, Buddy::None, 0))
             .collect::<Vec<Line>>();
 
         Editor {
@@ -207,11 +216,10 @@ impl<W: Write> Editor<W> {
     }
 
     pub fn set_cursor_offset(&mut self, offset: usize) -> Result<(), usize> {
-        let line_idx = self.lines.binary_search_by(|line| { // FIXME
-            cmp_range(offset, line.cell_range())
+        let line_idx = self.lines.binary_search_by(|line| {
+            cmp_range(offset, line.cell_range()).reverse()
         })?;
-        let col = self.cells[offset].col;
-        //let col = (offset - self.lines[line_idx].offset) * self.lines[line_idx].cpb;
+        let col = (offset - self.lines[line_idx].offset) * self.lines[line_idx].cpb;
         self.set_cursor(col, line_idx);
         Ok(())
     }
@@ -246,18 +254,22 @@ impl<W: Write> Editor<W> {
         self.cell_at_cursor_mut().format = format;
 
         let min_cell = self.cells(self.cursor_y).iter()
+            .filter(|c| c.offset == c.base_offset())
             .max_by_key(|c| c.format.cols_per_byte())
             .unwrap()
             .clone();
         let min_cpb = min_cell.format.cols_per_byte();
+        eprintln!("min cell {:?}", min_cell);
 
         if min_cpb < self.lines[self.cursor_y].cpb {
             self.lines[self.cursor_y].min_cpb = min_cpb;
             self.merge_lines(self.cursor_y);
         } else if min_cpb > self.lines[self.cursor_y].cpb {
             self.split_line(self.cursor_y, min_cell.offset, min_cpb);
+        } else {
+            self.lines[self.cursor_y].min_cpb = min_cpb;
         }
-        self.set_cursor_offset(cell.offset);
+        self.set_cursor_offset(cell.offset).unwrap();
     }
 
     fn split_line(&mut self, line_idx: usize, offset: usize, min_cpb: usize) {
@@ -270,18 +282,22 @@ impl<W: Write> Editor<W> {
 
             line.cpb *= 2;
             let len = N_COLS / line.cpb;
-            let mut new_line = Line::new(line.offset + len, line.len - len, line.cpb, line.min_cpb, line.buddy);
+            let mut new_line = Line::new(line.offset + len, line.len - len, line.cpb, line.min_cpb, line.buddy, line.level);
             line.len = len; // new_line.len < len for last (underfull) line
             if offset < new_line.offset {
                 // recalc new_line.min_cpb
                 line.buddy = Buddy::Below;
+                line.level += 1;
                 self.lines.insert(line_idx + 1, new_line);
                 self.split_line(line_idx, offset, min_cpb);
             } else {
                 new_line.buddy = Buddy::Above;
+                new_line.level += 1;
                 self.lines.insert(line_idx + 1, new_line);
                 self.split_line(line_idx + 1, offset, min_cpb);
             }
+        } else {
+            self.lines[line_idx].min_cpb = min_cpb;
         }
     }
 
@@ -289,7 +305,7 @@ impl<W: Write> Editor<W> {
         if self.lines[line_idx].min_cpb < self.lines[line_idx].cpb {
             match self.lines[line_idx].buddy {
                 Buddy::Above => {
-                    let line = self.lines[line_idx - 1].clone();
+                    let line = self.lines[line_idx].clone();
                     let buddy = &mut self.lines[line_idx - 1];
                     if buddy.min_cpb < buddy.cpb {
                         assert_eq!(buddy.cpb, line.cpb);
@@ -299,6 +315,10 @@ impl<W: Write> Editor<W> {
                         assert!(buddy.len * buddy.cpb <= N_COLS); // == except last line
                         self.lines.remove(line_idx);
                         self.merge_lines(line_idx - 1);
+                    } else if buddy.level < line.level { // only swap with higher level lines
+                        let bb = buddy.buddy;
+                        buddy.buddy = Buddy::Below;
+                        self.lines[line_idx].buddy = bb;
                     }
                 },
                 Buddy::Below => {
@@ -309,17 +329,21 @@ impl<W: Write> Editor<W> {
                         line.cpb /= 2;
                         line.min_cpb = max(line.min_cpb, buddy.min_cpb);
                         line.buddy = buddy.buddy;
+                        line.level = buddy.level;
                         line.len += buddy.len;
                         assert!(line.len * line.cpb <= N_COLS); // == except last line
                         self.lines.remove(line_idx + 1);
                         self.merge_lines(line_idx);
+                    } else if buddy.level < line.level {
+                        line.buddy = buddy.buddy;
+                        self.lines[line_idx + 1].buddy = Buddy::Above;
                     }
                 },
                 Buddy::None => {
-                    assert_eq!(line_idx, self.lines.len() - 1); // may only occur in last line
-                    let line = &mut self.lines[line_idx];
-                    line.cpb = line.min_cpb;
-                    assert!(line.len * line.cpb <= N_COLS);
+                    // assert_eq!(line_idx, self.lines.len() - 1); // may only occur in last line
+                    // let line = &mut self.lines[line_idx];
+                    // line.cpb = line.min_cpb;
+                    // assert!(line.len * line.cpb <= N_COLS);
                 },
             }
         }
@@ -550,6 +574,17 @@ impl<W: Write> Editor<W> {
             self.goto(1, 1 + (PADDING_TOP + i - self.scroll) as u16);
             self.draw_offset(i, offset);
 
+            let bi = match self.lines[i].buddy {
+                Buddy::Above => "^",
+                Buddy::Below => "v",
+                Buddy::None => "-",
+            };
+            self.write(format_args!(" {}{}{}{}",
+                                    self.lines[i].min_cpb,
+                                    self.lines[i].cpb,
+                                    self.lines[i].level,
+                                    bi));
+
             self.lines[i].offset = offset;
 
             let mut col = 0;
@@ -567,7 +602,9 @@ impl<W: Write> Editor<W> {
                 offset += cell.n_bytes();
             }
 
-            assert_eq!(self.lines[i].len, offset - self.lines[i].offset);
+            if self.lines[i].len != offset - self.lines[i].offset {
+                eprintln!("Line {:x}: len={} offset={}", i, self.lines[i].len, offset - self.lines[i].offset)
+            }
             self.draw_line_ascii(&data[self.lines[i].cell_range()]);
 
             i += 1;

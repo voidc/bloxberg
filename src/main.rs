@@ -33,6 +33,7 @@ fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>, data: &mut [u8]) {
         Key::Char('x') => editor.set_format(Format::Hex),
         Key::Char('d') => editor.set_format(Format::SDec),
         Key::Char('u') => editor.set_format(Format::Dec),
+        Key::Char('t') => editor.set_format(Format::Bin),
         Key::Char('e') => editor.switch_byte_order(),
         Key::Char('+') => editor.inc_width(),
         Key::Char('-') => editor.dec_width(),
