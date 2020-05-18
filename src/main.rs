@@ -32,14 +32,14 @@ fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>, data: &mut [u8]) {
         Key::Char('F') => editor.switch_format(true),
         Key::Char('x') => editor.set_format(Format::Hex),
         Key::Char('d') => editor.set_format(Format::SDec),
-        Key::Char('u') => editor.set_format(Format::Dec),
+        Key::Char('u') => editor.set_format(Format::UDec),
         Key::Char('t') => editor.set_format(Format::Bin),
         Key::Char('e') => editor.switch_byte_order(),
         Key::Char('+') => editor.inc_width(),
         Key::Char('-') => editor.dec_width(),
         Key::Char('b') => editor.set_width(Width::Byte8),
         Key::Char('w') => editor.set_width(Width::Word32),
-        Key::Char('a') => editor.set_width(Width::Address),
+        Key::Char('a') => editor.set_width(Width::ADDRESS),
         Key::Char('q') => editor.finished = true,
         _ => {}
     }

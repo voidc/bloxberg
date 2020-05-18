@@ -9,9 +9,11 @@ use crate::util::cmp_range;
 use std::ops::Range;
 use std::mem::size_of;
 
-const N_COLS: usize = 16;
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
+#[cfg(target_pointer_width = "64")]
+const PADDING_LEFT: usize = 2 + 2 * 8;
+// const PADDING_LEFT: usize = 2 + 2 * Width::ADDRESS.n_bytes(); // requires const_if_match
 
 #[derive(Debug, Copy, Clone)]
 struct Line {
@@ -68,6 +70,7 @@ pub enum EditorMode {
 pub struct Editor<W: Write> {
     stdout: RefCell<W>,
     pub height: usize,
+    n_cols: usize,
     mode: EditorMode,
     scroll: usize,
     cursor_x: usize,
@@ -81,17 +84,26 @@ pub struct Editor<W: Write> {
 }
 
 impl<W: Write> Editor<W> {
-    pub fn new(stdout: W, height: usize, n_bytes: usize) -> Self {
+    pub fn new(stdout: W, width: usize, height: usize, n_bytes: usize) -> Self {
+        let n_cols = match ((width / 2) - PADDING_LEFT) / 3 {
+            0 ... 8 => panic!(""),
+            8 ... 16 => 8,
+            16 ... 32 => 16,
+            32 ... 64 => 32,
+            _ => 64,
+        };
+
         let cells = (0..n_bytes)
-            .map(|i| Cell::new_hex(i, i % N_COLS))
+            .map(|i| Cell::new_hex(i, i % n_cols))
             .collect::<Vec<Cell>>();
-        let lines = cells.chunks(N_COLS)
+        let lines = cells.chunks(n_cols)
             .map(|c| Line::new(c[0].offset, c.len(), 1, 1, Buddy::None, 0))
             .collect::<Vec<Line>>();
 
         Editor {
             stdout: RefCell::new(stdout),
             height: height - PADDING_TOP - PADDING_BOTTOM,
+            n_cols,
             mode: EditorMode::Normal,
             scroll: 0,
             cursor_x: 0,
@@ -248,7 +260,7 @@ impl<W: Write> Editor<W> {
 
     pub fn set_format(&mut self, format: Format) {
         let cell = self.cell_at_cursor().clone();
-        if cell.format == format || cell.n_bytes() * format.cols_per_byte() > N_COLS {
+        if cell.format == format || cell.n_bytes() * format.cols_per_byte() > self.n_cols {
             return;
         }
         self.cell_at_cursor_mut().format = format;
@@ -278,17 +290,16 @@ impl<W: Write> Editor<W> {
     fn split_line(&mut self, line_idx: usize, offset: usize, min_cpb: usize) {
         if min_cpb > self.lines[line_idx].cpb {
             let line = &mut self.lines[line_idx];
-            if line.len * min_cpb <= N_COLS {
+            if line.len * min_cpb <= self.n_cols {
                 assert_eq!(line_idx, self.lines.len() - 1); // may only occur in last line
                 return;
             }
 
             line.cpb *= 2;
-            let len = N_COLS / line.cpb;
+            let len = self.n_cols / line.cpb;
             let mut new_line = Line::new(line.offset + len, line.len - len, line.cpb, line.min_cpb, line.buddy, line.level);
             line.len = len; // new_line.len < len for last (underfull) line
             if offset < new_line.offset {
-                // recalc new_line.min_cpb
                 line.buddy = Buddy::Below;
                 line.level += 1;
                 self.lines.insert(line_idx + 1, new_line);
@@ -317,7 +328,7 @@ impl<W: Write> Editor<W> {
                         buddy.cpb /= 2;
                         buddy.min_cpb = max(line.min_cpb, buddy.min_cpb);
                         buddy.len += line.len;
-                        assert!(buddy.len * buddy.cpb <= N_COLS); // == except last line
+                        assert!(buddy.len * buddy.cpb <= self.n_cols); // == except last line
                         self.lines.remove(line_idx);
                         self.merge_lines(line_idx - 1);
                     } else if buddy.level < line.level { // only swap with higher level lines
@@ -336,7 +347,7 @@ impl<W: Write> Editor<W> {
                         line.buddy = buddy.buddy;
                         line.level = buddy.level;
                         line.len += buddy.len;
-                        assert!(line.len * line.cpb <= N_COLS); // == except last line
+                        assert!(line.len * line.cpb <= self.n_cols); // == except last line
                         self.lines.remove(line_idx + 1);
                         self.merge_lines(line_idx);
                     } else if buddy.level < line.level {
@@ -348,7 +359,7 @@ impl<W: Write> Editor<W> {
                     // assert_eq!(line_idx, self.lines.len() - 1); // may only occur in last line
                     // let line = &mut self.lines[line_idx];
                     // line.cpb = line.min_cpb;
-                    // assert!(line.len * line.cpb <= N_COLS);
+                    // assert!(line.len * line.cpb <= self.n_cols);
                 },
             }
         }
@@ -369,7 +380,7 @@ impl<W: Write> Editor<W> {
 
     pub fn set_width(&mut self, width: Width) {
         let old_cell = self.cell_at_cursor().clone();
-        if old_cell.width == width || width.n_bytes() * old_cell.format.cols_per_byte() > N_COLS {
+        if old_cell.width == width || width.n_bytes() * old_cell.format.cols_per_byte() > self.n_cols {
             return;
         }
 
@@ -406,7 +417,7 @@ impl<W: Write> Editor<W> {
 
     pub fn follow_pointer(&mut self, data: &[u8]) {
         let cell = self.cell_at_cursor();
-        if cell.width.n_bytes() != size_of::<usize>() {
+        if cell.width != Width::ADDRESS {
             return;
         }
         let offset = cell.parse_value(&data[cell.offset..]) as usize;
@@ -456,22 +467,14 @@ impl<W: Write> Editor<W> {
 
     fn escape_non_printable(chr: char) -> char {
         match chr {
-            // line feed
-            '\x0A' => '␊',
-            // carriage return
-            '\x0D' => '␍',
-            // null
-            '\x00' => '␀',
-            // bell
-            '\x07' => '␇',
-            // backspace
-            '\x08' => '␈',
-            // escape
-            '\x1B' => '␛',
-            // tab
-            '\t' => '↹',
-            // space
-            _ => '•',
+            '\x0a' => '␊', // line feed
+            '\x0d' => '␍', // carriage return
+            '\x00' => '␀', // null
+            '\x07' => '␇', // bell
+            '\x08' => '␈', // backspace
+            '\x1b' => '␛', // escape
+            '\t' => '↹', // tab
+            _ => '•', // space
         }
     }
 
@@ -507,7 +510,7 @@ impl<W: Write> Editor<W> {
                 let w = 2 * cell.n_bytes();
                 self.write(format_args!("{1:2$}{:03$x}", value, "", cell_width - w, w));
             }
-            Format::Dec => {
+            Format::UDec => {
                 self.write(format_args!("{:>1$}", value, cell_width));
             }
             Format::SDec => {
@@ -532,11 +535,11 @@ impl<W: Write> Editor<W> {
         ));
     }
 
-    fn draw_header(&self) {
+    fn draw_header(&self, padding: usize) {
         self.goto(1, 1);
-        self.write(format_args!("{0:1$}", "", 18));
+        self.write(format_args!("{0:1$}", "", padding));
         let cpb = self.lines[self.cursor_y].cpb;
-        for i in 0..(N_COLS / cpb) {
+        for i in 0..(self.n_cols / cpb) {
             if self.cursor_x / cpb == i {
                 self.write(format_args!(" {}{3:4$}{:02x}{}",
                                         termion::color::Fg(termion::color::LightBlue),
@@ -568,7 +571,7 @@ impl<W: Write> Editor<W> {
 
     pub fn draw(&mut self, data: &[u8]) {
         self.write(format_args!("{}", termion::clear::All));
-        self.draw_header();
+        self.draw_header(PADDING_LEFT);
 
         let mut offset = self.lines[self.scroll].offset;
 
@@ -579,6 +582,7 @@ impl<W: Write> Editor<W> {
             self.goto(1, 1 + (PADDING_TOP + i - self.scroll) as u16);
             self.draw_offset(i, offset);
 
+            /*
             let bi = match self.lines[i].buddy {
                 Buddy::Above => "^",
                 Buddy::Below => "v",
@@ -589,11 +593,12 @@ impl<W: Write> Editor<W> {
                                     self.lines[i].cpb,
                                     self.lines[i].level,
                                     bi));
+             */
 
             self.lines[i].offset = offset;
 
             let mut col = 0;
-            while col < N_COLS && offset < self.cells.len() {
+            while col < self.n_cols && offset < self.cells.len() {
                 self.cells[offset].col = col; //?
 
                 let cell = self.cells[offset];
@@ -601,7 +606,7 @@ impl<W: Write> Editor<W> {
                 let selected = self.cursor_y == i && col <= self.cursor_x && self.cursor_x < col + n_cols;
                 col += n_cols;
 
-                assert!(col <= N_COLS);
+                assert!(col <= self.n_cols);
 
                 self.draw_cell(&cell, selected, self.lines[i].cpb * cell.n_bytes(), &data[offset..]);
                 offset += cell.n_bytes();

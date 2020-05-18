@@ -4,7 +4,7 @@ use std::ops::Range;
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Format {
     Hex,
-    Dec,
+    UDec,
     SDec,
     Oct,
     Bin,
@@ -15,7 +15,7 @@ impl Format {
     pub fn cols_per_byte(&self) -> usize {
         match &self {
             Format::Hex | Format::Char => 1,
-            Format::Dec | Format::SDec | Format::Oct => 2,
+            Format::UDec | Format::SDec | Format::Oct => 2,
             Format::Bin => 4,
         }
     }
@@ -23,10 +23,10 @@ impl Format {
     pub fn cycle(&self, rev: bool) -> Self {
         match self {
             Format::Hex if rev => Format::Char,
-            Format::Hex => Format::Dec,
-            Format::Dec if rev => Format::Hex,
-            Format::Dec => Format::SDec,
-            Format::SDec if rev => Format::Dec,
+            Format::Hex => Format::UDec,
+            Format::UDec if rev => Format::Hex,
+            Format::UDec => Format::SDec,
+            Format::SDec if rev => Format::UDec,
             Format::SDec => Format::Oct,
             Format::Oct if rev => Format::SDec,
             Format::Oct => Format::Bin,
@@ -50,7 +50,7 @@ pub enum Width {
 
 impl Width {
     #[cfg(target_pointer_width = "64")]
-    pub const Address: Width = Width::DWord64;
+    pub const ADDRESS: Width = Width::DWord64;
 
     pub fn n_bytes(&self) -> usize {
         match &self {
