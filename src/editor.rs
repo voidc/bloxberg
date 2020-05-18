@@ -254,6 +254,12 @@ impl<W: Write> Editor<W> {
         }
     }
 
+    pub fn scroll(&mut self, dy: isize) {
+        if self.scroll > 0 && self.scroll < self.lines.len() - 1 {
+            self.scroll = ((self.scroll as isize) + dy) as usize;
+        }
+    }
+
     pub fn switch_format(&mut self, rev: bool) {
         self.set_format(self.cell_at_cursor().format.cycle(rev));
     }

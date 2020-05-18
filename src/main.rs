@@ -1,7 +1,7 @@
 use std::io;
 use std::io::{stdin, stdout, Write};
-use termion::event::Key;
-use termion::input::TermRead;
+use termion::event::{Key, Event, MouseEvent, MouseButton};
+use termion::input::{TermRead, MouseTerminal};
 use termion::raw::IntoRawMode;
 
 use crate::cell::{Format, Width};
@@ -45,6 +45,15 @@ fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>, data: &mut [u8]) {
     }
 }
 
+fn handle_mouse<W: Write>(me: MouseEvent, editor: &mut Editor<W>) {
+    eprintln!("{:?}", me);
+    match me {
+        MouseEvent::Press(MouseButton::WheelUp, _, _) => editor.scroll(-1),
+        MouseEvent::Press(MouseButton::WheelDown, _, _) => editor.scroll(1),
+        _ => {},
+    }
+}
+
 fn main() -> Result<(), io::Error> {
     // kitty --hold sh -c "tty"
     // kitty sh -c "reptyr pid"
@@ -55,14 +64,23 @@ fn main() -> Result<(), io::Error> {
     //let mut file = fs::File::open(path)?;
     let mut data = [0x00_u8; 160];
 
-    let stdout = stdout().into_raw_mode()?;
-    let (_width, height) = termion::terminal_size()?;
-    let mut editor = Editor::new(stdout, height as usize, data.len());
+    let stdout: MouseTerminal<_> = stdout().into_raw_mode()?.into();
+    let (width, height) = termion::terminal_size()?;
+    let mut editor = Editor::new(
+        stdout,
+        width as usize,
+        height as usize,
+        data.len());
     editor.init(&data);
 
     let stdin = stdin();
-    for c in stdin.keys() {
-        handle_key(c?, &mut editor, &mut data);
+    for evt in stdin.events() {
+        match evt? {
+            Event::Key(key) => handle_key(key, &mut editor, &mut data),
+            Event::Mouse(me) => handle_mouse(me, &mut editor),
+            _ => {},
+        }
+
         if editor.finished {
             break;
         }
