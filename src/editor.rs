@@ -253,13 +253,8 @@ impl<W: Write> Editor<W> {
         }
         self.cell_at_cursor_mut().format = format;
 
-        let min_cell = self.cells(self.cursor_y).iter()
-            .filter(|c| c.offset == c.base_offset())
-            .max_by_key(|c| c.format.cols_per_byte())
-            .unwrap()
-            .clone();
+        let min_cell = self.max_cpb_cell(self.cursor_y);
         let min_cpb = min_cell.format.cols_per_byte();
-        eprintln!("min cell {:?}", min_cell);
 
         if min_cpb < self.lines[self.cursor_y].cpb {
             self.lines[self.cursor_y].min_cpb = min_cpb;
@@ -270,6 +265,14 @@ impl<W: Write> Editor<W> {
             self.lines[self.cursor_y].min_cpb = min_cpb;
         }
         self.set_cursor_offset(cell.offset).unwrap();
+    }
+
+    fn max_cpb_cell(&self, line_idx: usize) -> Cell {
+         self.cells(line_idx).iter()
+            .filter(|c| c.offset == c.base_offset())
+            .max_by_key(|c| c.format.cols_per_byte())
+            .unwrap()
+            .clone()
     }
 
     fn split_line(&mut self, line_idx: usize, offset: usize, min_cpb: usize) {
@@ -290,11 +293,13 @@ impl<W: Write> Editor<W> {
                 line.level += 1;
                 self.lines.insert(line_idx + 1, new_line);
                 self.split_line(line_idx, offset, min_cpb);
+                self.lines[line_idx + 1].min_cpb = self.max_cpb_cell(line_idx + 1).format.cols_per_byte();
             } else {
                 new_line.buddy = Buddy::Above;
                 new_line.level += 1;
                 self.lines.insert(line_idx + 1, new_line);
                 self.split_line(line_idx + 1, offset, min_cpb);
+                self.lines[line_idx].min_cpb = self.max_cpb_cell(line_idx).format.cols_per_byte();
             }
         } else {
             self.lines[line_idx].min_cpb = min_cpb;
