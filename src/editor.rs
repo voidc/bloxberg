@@ -413,21 +413,32 @@ impl<'d, W: Write> Editor<'d, W> {
 
     pub fn insert(&mut self, c: char) {
         let cell = self.cell_at_cursor().clone();
-        if cell.format != Format::Hex || !c.is_ascii_hexdigit() {
-            return;
-        }
+        let digit = if let Some(d) = cell.format.parse_char(c) { d } else { return };
+        if let Format::UDec | Format::SDec = cell.format { return } // unimplemented
 
         let data = self.data_store.data_mut();
-        let old = data[cell.offset];
-        let new = c.to_digit(16).unwrap() as u8;
+        let cpb = cell.format.chars_per_byte();
+        if self.cursor_offset < cpb * cell.n_bytes() {
+            let byte_idx = match cell.byte_order {
+                ByteOrder::BigEndian => self.cursor_offset / cpb,
+                ByteOrder::LittleEndian => cell.n_bytes() - self.cursor_offset / cpb - 1,
+            };
+            let old = data[cell.offset + byte_idx];
+            let pos = (cpb - self.cursor_offset % cpb - 1) as u8;
+            data[cell.offset + byte_idx] = match cell.format {
+                Format::Hex => (old & !(0x0f << pos*4)) | (digit << pos*4),
+                Format::Oct => (old & !(0x07 << pos*3)) | (digit << pos*3),
+                Format::Bin => (old & !(0x01 << pos*1)) | (digit << pos*1),
+                Format::Char => digit,
+                _ => unimplemented!(),
+            };
 
-        if self.cursor_offset == 0 {
-            data[cell.offset] = (old & 0x0f) | (new << 4);
-            self.cursor_offset = 1;
-        } else if self.cursor_offset == 1 {
-            data[cell.offset] = (old & 0xf0) | new;
-            self.cursor_offset = 0;
-            self.move_cursor_next();
+            if self.cursor_offset == cpb * cell.n_bytes() - 1 {
+                self.cursor_offset = 0;
+                self.move_cursor_next();
+            } else {
+                self.cursor_offset += 1;
+            }
         }
 
         self.dirty = true;

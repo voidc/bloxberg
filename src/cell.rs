@@ -36,6 +36,26 @@ impl Format {
             Format::Char => Format::Hex,
         }
     }
+
+    pub fn chars_per_byte(&self) -> usize {
+        match &self {
+            Format::Hex => 2,
+            Format::UDec | Format::SDec => 3,
+            Format::Oct => 4,
+            Format::Bin => 8,
+            Format::Char => 1,
+        }
+    }
+
+    pub fn parse_char(&self, c: char) -> Option<u8> {
+        match &self {
+            Format::Hex => c.to_digit(16),
+            Format::UDec | Format::SDec => c.to_digit(10),
+            Format::Oct => c.to_digit(8),
+            Format::Bin => c.to_digit(2),
+            Format::Char => Some(c as u32),
+        }.map(|x| x as u8)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
