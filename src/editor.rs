@@ -275,6 +275,24 @@ impl<'d, W: Write> Editor<'d, W> {
         self.set_format(self.cell_at_cursor().format.cycle(rev));
     }
 
+    pub fn format_string(&mut self) {
+        let mut last_offset = None;
+        loop {
+            let cell = self.cell_at_cursor();
+            if let Some(last_offset) = last_offset {
+                if cell.offset <= last_offset {
+                    break;
+                }
+            }
+            if cell.width != Width::Byte8 || self.data_store.data()[cell.offset] == 0 {
+                break;
+            }
+            last_offset = Some(cell.offset);
+            self.set_format(Format::Char);
+            self.move_cursor_next();
+        }
+    }
+
     pub fn set_format(&mut self, format: Format) {
         let cell = self.cell_at_cursor().clone();
         if cell.format == format || cell.n_bytes() * format.cols_per_byte() > self.n_cols {

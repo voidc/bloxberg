@@ -37,6 +37,8 @@ fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>) {
         Key::Char('d') => editor.set_format(Format::SDec),
         Key::Char('u') => editor.set_format(Format::UDec),
         Key::Char('t') => editor.set_format(Format::Bin),
+        Key::Char('c') => editor.set_format(Format::Char),
+        Key::Char('s') => editor.format_string(),
         Key::Char('e') => editor.switch_byte_order(),
         Key::Char('+') => editor.inc_width(),
         Key::Char('-') => editor.dec_width(),
