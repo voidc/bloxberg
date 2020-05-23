@@ -1,22 +1,25 @@
-use std::io;
+use std::{io, env};
 use std::io::{stdin, stdout, Write};
 use termion::event::{Key, Event, MouseEvent, MouseButton};
 use termion::input::{TermRead, MouseTerminal};
 use termion::raw::IntoRawMode;
+use std::fs::OpenOptions;
 
 use crate::cell::{Format, Width};
 use crate::editor::*;
+use crate::data_store::DataStore;
 
+mod data_store;
 mod editor;
 mod cell;
 mod util;
 
-fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>, data: &mut [u8]) {
+fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>) {
     match key {
         Key::Esc => editor.set_mode(EditorMode::Normal),
         Key::Char(c) if editor.is_cmd() => editor.type_cmd(c),
         Key::Backspace if editor.is_cmd() => editor.type_cmd('\x08'),
-        Key::Char(c) if editor.is_ins() => editor.insert(c, data),
+        Key::Char(c) if editor.is_ins() => editor.insert(c),
         Key::Char(':') => editor.set_mode(EditorMode::Command),
         Key::Char('i') => editor.set_mode(EditorMode::Insert),
         Key::Right | Key::Char('l') => editor.move_cursor_next(),
@@ -27,7 +30,7 @@ fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>, data: &mut [u8]) {
         Key::PageUp => editor.move_cursor_y(-(editor.height as isize)),
         Key::Home => editor.set_cursor(0, 0),
         Key::End => editor.set_cursor_end(),
-        Key::Char('p') => editor.follow_pointer(data),
+        Key::Char('p') => editor.follow_pointer(),
         Key::Char('f') => editor.switch_format(false),
         Key::Char('F') => editor.switch_format(true),
         Key::Char('x') => editor.set_format(Format::Hex),
@@ -55,28 +58,35 @@ fn handle_mouse<W: Write>(me: MouseEvent, editor: &mut Editor<W>) {
 }
 
 fn main() -> Result<(), io::Error> {
-    // kitty --hold sh -c "tty"
-    // kitty sh -c "reptyr pid"
-    // gdb set inferior-tty /dev/pts/tty
-    eprintln!("{}", std::process::id());
+    let mut data_store = if let Some(arg) = env::args().nth(1) {
+        if let Ok(n_bytes) = arg.parse() {
+            DataStore::anon(n_bytes)?
+        } else {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(arg)?;
 
-    //let path = env::args().nth(1).expect("Missing filename.");
-    //let mut file = fs::File::open(path)?;
-    let mut data = [0x00_u8; 160];
+            DataStore::file(file)?
+        }
+    } else {
+        DataStore::anon(1024)?
+    };
 
     let stdout: MouseTerminal<_> = stdout().into_raw_mode()?.into();
     let (width, height) = termion::terminal_size()?;
     let mut editor = Editor::new(
+        &mut data_store,
         stdout,
         width as usize,
-        height as usize,
-        data.len());
-    editor.init(&data);
+        height as usize);
+    editor.init();
 
     let stdin = stdin();
     for evt in stdin.events() {
         match evt? {
-            Event::Key(key) => handle_key(key, &mut editor, &mut data),
+            Event::Key(key) => handle_key(key, &mut editor),
             Event::Mouse(me) => handle_mouse(me, &mut editor),
             _ => {},
         }
@@ -84,7 +94,7 @@ fn main() -> Result<(), io::Error> {
         if editor.finished {
             break;
         }
-        editor.draw(&data);
+        editor.draw();
     }
 
     Ok(())

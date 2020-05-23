@@ -7,6 +7,7 @@ use crate::cell::*;
 use std::cell::RefCell;
 use crate::util::cmp_range;
 use std::ops::Range;
+use crate::data_store::DataStore;
 
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
@@ -74,7 +75,8 @@ pub enum EditorMode {
     Command,
 }
 
-pub struct Editor<W: Write> {
+pub struct Editor<'d, W: Write> {
+    data_store: &'d mut DataStore,
     stdout: RefCell<W>,
     pub height: usize,
     n_cols: usize,
@@ -90,8 +92,8 @@ pub struct Editor<W: Write> {
     dirty: bool,
 }
 
-impl<W: Write> Editor<W> {
-    pub fn new(stdout: W, width: usize, height: usize, n_bytes: usize) -> Self {
+impl<'d, W: Write> Editor<'d, W> {
+    pub fn new(data_store: &'d mut DataStore, stdout: W, width: usize, height: usize) -> Self {
         let n_cols = match ((width / 2) - PADDING_LEFT) / 3 {
             0..=7 => panic!(""),
             8..=15 => 8,
@@ -100,6 +102,7 @@ impl<W: Write> Editor<W> {
             _ => 64,
         };
 
+        let n_bytes = data_store.data().len();
         let cells = (0..n_bytes)
             .map(|i| Cell::new_hex(i))
             .collect::<Vec<Cell>>();
@@ -108,6 +111,7 @@ impl<W: Write> Editor<W> {
             .collect::<Vec<Line>>();
 
         Editor {
+            data_store,
             stdout: RefCell::new(stdout),
             height: height - PADDING_TOP - PADDING_BOTTOM,
             n_cols,
@@ -124,10 +128,10 @@ impl<W: Write> Editor<W> {
         }
     }
 
-    pub fn init(&mut self, data: &[u8]) {
+    pub fn init(&mut self) {
         self.write(format_args!("{}{}", termion::clear::All, termion::cursor::Hide));
         self.set_cursor(0, 0);
-        self.draw(&data);
+        self.draw();
     }
 
     pub fn set_mode(&mut self, mode: EditorMode) {
@@ -407,12 +411,13 @@ impl<W: Write> Editor<W> {
         }
     }
 
-    pub fn insert(&mut self, c: char, data: &mut [u8]) {
-        let cell = self.cell_at_cursor();
+    pub fn insert(&mut self, c: char) {
+        let cell = self.cell_at_cursor().clone();
         if cell.format != Format::Hex || !c.is_ascii_hexdigit() {
             return;
         }
 
+        let data = self.data_store.data_mut();
         let old = data[cell.offset];
         let new = c.to_digit(16).unwrap() as u8;
 
@@ -428,11 +433,12 @@ impl<W: Write> Editor<W> {
         self.dirty = true;
     }
 
-    pub fn follow_pointer(&mut self, data: &[u8]) {
+    pub fn follow_pointer(&mut self) {
         let cell = self.cell_at_cursor();
         if cell.width != Width::ADDRESS {
             return;
         }
+        let data = self.data_store.data();
         let offset = cell.parse_value(&data[cell.offset..]) as usize;
         self.set_cursor_offset(offset).unwrap();
     }
@@ -440,7 +446,10 @@ impl<W: Write> Editor<W> {
     pub fn type_cmd(&mut self, c: char) {
         if c == '\n' {
             match &self.cmd_buf[..] {
-                "w" => self.dirty = false,
+                "w" => {
+                    self.data_store.write();
+                    self.dirty = false
+                },
                 "q" => self.finished = true,
                 cmd => {
                     if let Ok(offset) = usize::from_str_radix(cmd, 16) {
@@ -491,7 +500,7 @@ impl<W: Write> Editor<W> {
         }
     }
 
-    fn draw_cell(&self, cell: &Cell, selected: bool, min_cols: usize, data: &[u8]) {
+    fn draw_cell(&self, cell: &Cell, selected: bool, min_cols: usize) {
         fn value_to_char(value: u128) -> Option<char> {
             let c = char::from_u32(value as u32)?;
             if c.is_ascii() && !c.is_ascii_control() {
@@ -501,6 +510,7 @@ impl<W: Write> Editor<W> {
             }
         }
 
+        let data = &self.data_store.data()[cell.offset..];
         assert!(data.len() >= cell.n_bytes());
         self.write(format_args!(" "));
 
@@ -578,11 +588,12 @@ impl<W: Write> Editor<W> {
         }
     }
 
-    fn draw_line_ascii(&self, data: &[u8]) {
+    fn draw_line_ascii(&self, range: Range<usize>) {
+        let data = &self.data_store.data()[range];
         self.write(format_args!(" {}", String::from_utf8_lossy(data)));
     }
 
-    pub fn draw(&mut self, data: &[u8]) {
+    pub fn draw(&mut self) {
         self.write(format_args!("{}", termion::clear::All));
         self.draw_header(PADDING_LEFT);
 
@@ -622,14 +633,14 @@ impl<W: Write> Editor<W> {
 
                 assert!(col <= self.n_cols);
 
-                self.draw_cell(&cell, selected, self.lines[i].cpb * cell.n_bytes(), &data[offset..]);
+                self.draw_cell(&cell, selected, self.lines[i].cpb * cell.n_bytes());
                 offset += cell.n_bytes();
             }
 
             if self.lines[i].len != offset - self.lines[i].offset {
                 eprintln!("Line {:x}: len={} offset={}", i, self.lines[i].len, offset - self.lines[i].offset)
             }
-            self.draw_line_ascii(&data[self.lines[i].cell_range()]);
+            self.draw_line_ascii(self.lines[i].cell_range());
 
             i += 1;
         }
@@ -647,7 +658,7 @@ impl<W: Write> Editor<W> {
     }
 }
 
-impl<W: Write> Drop for Editor<W> {
+impl<W: Write> Drop for Editor<'_, W> {
     fn drop(&mut self) {
         self.write(format_args!("{}{}{}",
                                 termion::clear::All,
