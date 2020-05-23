@@ -7,7 +7,6 @@ use crate::cell::*;
 use std::cell::RefCell;
 use crate::util::cmp_range;
 use std::ops::Range;
-use std::mem::size_of;
 
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
@@ -55,6 +54,14 @@ impl Line {
         self.offset..self.offset+self.len
     }
 
+    fn col_to_offset(&self, col: usize) -> usize {
+        self.offset + col / self.cpb
+    }
+
+    fn offset_to_col(&self, offset: usize) -> usize {
+        (offset - self.offset) * self.cpb
+    }
+
     fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -86,15 +93,15 @@ pub struct Editor<W: Write> {
 impl<W: Write> Editor<W> {
     pub fn new(stdout: W, width: usize, height: usize, n_bytes: usize) -> Self {
         let n_cols = match ((width / 2) - PADDING_LEFT) / 3 {
-            0 ... 8 => panic!(""),
-            8 ... 16 => 8,
-            16 ... 32 => 16,
-            32 ... 64 => 32,
+            0..=7 => panic!(""),
+            8..=15 => 8,
+            16..=31 => 16,
+            32..=63 => 32,
             _ => 64,
         };
 
         let cells = (0..n_bytes)
-            .map(|i| Cell::new_hex(i, i % n_cols))
+            .map(|i| Cell::new_hex(i))
             .collect::<Vec<Cell>>();
         let lines = cells.chunks(n_cols)
             .map(|c| Line::new(c[0].offset, c.len(), 1, 1, Buddy::None, 0))
@@ -148,7 +155,7 @@ impl<W: Write> Editor<W> {
     }
 
     fn cell_index_at_col(&self, line_idx: usize, col: usize) -> Option<usize> {
-        let idx = self.lines[line_idx].offset + col / self.lines[line_idx].cpb;
+        let idx = self.lines[line_idx].col_to_offset(col);
         Some(self.cells.get(idx)?.base_offset())
     }
 
@@ -188,7 +195,7 @@ impl<W: Write> Editor<W> {
             }
         }
 
-        let new_x = self.cells[new_cell_idx].col; //?
+        let new_x = self.lines[new_y].offset_to_col(new_cell_idx);
         self.set_cursor(new_x, new_y);
     }
 
@@ -211,7 +218,7 @@ impl<W: Write> Editor<W> {
             }
         }
 
-        let new_x = self.cells[new_cell_idx].col;
+        let new_x = self.lines[new_y].offset_to_col(new_cell_idx);
         self.set_cursor(new_x, new_y);
     }
 
@@ -231,14 +238,14 @@ impl<W: Write> Editor<W> {
         let line_idx = self.lines.binary_search_by(|line| {
             cmp_range(offset, line.cell_range()).reverse()
         })?;
-        let col = (offset - self.lines[line_idx].offset) * self.lines[line_idx].cpb;
+        let col = self.lines[line_idx].offset_to_col(offset);
         self.set_cursor(col, line_idx);
         Ok(())
     }
 
     pub fn set_cursor_end(&mut self) {
         let y = self.lines.len() - 1;
-        let x = self.cells.last().unwrap().col;
+        let x = self.lines.last().unwrap().offset_to_col(self.cells.len() - 1);
         self.set_cursor(x, y);
     }
 
@@ -427,7 +434,7 @@ impl<W: Write> Editor<W> {
             return;
         }
         let offset = cell.parse_value(&data[cell.offset..]) as usize;
-        self.set_cursor_offset(offset);
+        self.set_cursor_offset(offset).unwrap();
     }
 
     pub fn type_cmd(&mut self, c: char) {
@@ -437,7 +444,7 @@ impl<W: Write> Editor<W> {
                 "q" => self.finished = true,
                 cmd => {
                     if let Ok(offset) = usize::from_str_radix(cmd, 16) {
-                        self.set_cursor_offset(offset);
+                        self.set_cursor_offset(offset).unwrap();
                     } else {
                         eprintln!("Unknown Command: \"{}\"", cmd)
                     }
@@ -605,7 +612,8 @@ impl<W: Write> Editor<W> {
 
             let mut col = 0;
             while col < self.n_cols && offset < self.cells.len() {
-                self.cells[offset].col = col; //?
+                assert_eq!(self.lines[i].offset_to_col(offset), col);
+                assert_eq!(self.lines[i].col_to_offset(col), offset);
 
                 let cell = self.cells[offset];
                 let n_cols = max(cell.n_cols(), self.lines[i].cpb * cell.n_bytes());

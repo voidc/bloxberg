@@ -112,25 +112,23 @@ impl ByteOrder {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Cell {
     pub offset: usize,
-    pub col: usize,
     pub format: Format,
     pub width: Width,
     pub byte_order: ByteOrder,
 }
 
 impl Cell {
-    pub fn new(offset: usize, col: usize, format: Format, width: Width, byte_order: ByteOrder) -> Self {
+    pub fn new(offset: usize, format: Format, width: Width, byte_order: ByteOrder) -> Self {
         Cell {
             offset,
-            col,
             format,
             width,
             byte_order,
         }
     }
 
-    pub fn new_hex(offset: usize, col: usize) -> Self {
-        Self::new(offset, col, Format::Hex, Width::Byte8, ByteOrder::LittleEndian)
+    pub fn new_hex(offset: usize) -> Self {
+        Self::new(offset, Format::Hex, Width::Byte8, ByteOrder::LittleEndian)
     }
 
     pub fn n_bytes(&self) -> usize {
