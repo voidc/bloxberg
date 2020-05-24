@@ -77,7 +77,7 @@ pub enum EditorMode {
 
 pub struct Editor<'d, W: Write> {
     data_store: &'d mut DataStore,
-    stdout: RefCell<W>,
+    writer: RefCell<W>,
     pub height: usize,
     n_cols: usize,
     mode: EditorMode,
@@ -93,7 +93,7 @@ pub struct Editor<'d, W: Write> {
 }
 
 impl<'d, W: Write> Editor<'d, W> {
-    pub fn new(data_store: &'d mut DataStore, stdout: W, width: usize, height: usize) -> Self {
+    pub fn new(data_store: &'d mut DataStore, writer: W, width: usize, height: usize) -> Self {
         let n_cols = match ((width / 2) - PADDING_LEFT) / 3 {
             0..=7 => panic!(""),
             8..=15 => 8,
@@ -112,7 +112,7 @@ impl<'d, W: Write> Editor<'d, W> {
 
         Editor {
             data_store,
-            stdout: RefCell::new(stdout),
+            writer: RefCell::new(writer),
             height: height - PADDING_TOP - PADDING_BOTTOM,
             n_cols,
             mode: EditorMode::Normal,
@@ -147,7 +147,7 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     pub fn write(&self, args: fmt::Arguments) {
-        self.stdout.borrow_mut().write_fmt(args).unwrap();
+        self.writer.borrow_mut().write_fmt(args).unwrap();
     }
 
     fn cells(&self, line_idx: usize) -> &[Cell] {
@@ -514,6 +514,7 @@ impl<'d, W: Write> Editor<'d, W> {
                                     self.cursor_y * 100 / self.lines.len() as usize,
             ));
         }
+        self.write(format_args!("{}", termion::clear::UntilNewline));
     }
 
     fn escape_non_printable(chr: char) -> char {
@@ -603,6 +604,7 @@ impl<'d, W: Write> Editor<'d, W> {
                 self.write(format_args!(" {1:2$}{:02x}", i, "", (cpb - 1) * 3));
             }
         }
+        self.write(format_args!("{}", termion::clear::UntilNewline));
     }
 
     fn draw_offset(&self, line_idx: usize, offset: usize) {
@@ -623,7 +625,6 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     pub fn draw(&mut self) {
-        self.write(format_args!("{}", termion::clear::All));
         self.draw_header(PADDING_LEFT);
 
         let mut offset = self.lines[self.scroll].offset;
@@ -669,7 +670,8 @@ impl<'d, W: Write> Editor<'d, W> {
             if self.lines[i].len != offset - self.lines[i].offset {
                 eprintln!("Line {:x}: len={} offset={}", i, self.lines[i].len, offset - self.lines[i].offset)
             }
-            self.draw_line_ascii(self.lines[i].cell_range());
+            //self.draw_line_ascii(self.lines[i].cell_range());
+            self.write(format_args!("{}", termion::clear::UntilNewline));
 
             i += 1;
         }
@@ -683,7 +685,7 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     fn flush(&self) {
-        self.stdout.borrow_mut().flush().unwrap();
+        self.writer.borrow_mut().flush().unwrap();
     }
 }
 

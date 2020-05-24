@@ -1,5 +1,5 @@
 use std::{io, env};
-use std::io::{stdin, stdout, Write};
+use std::io::{stdin, stdout, Write, BufWriter};
 use termion::event::{Key, Event, MouseEvent, MouseButton};
 use termion::input::{TermRead, MouseTerminal};
 use termion::raw::IntoRawMode;
@@ -77,10 +77,11 @@ fn main() -> Result<(), io::Error> {
     };
 
     let stdout: MouseTerminal<_> = stdout().into_raw_mode()?.into();
+    let mut writer = BufWriter::new(stdout);
     let (width, height) = termion::terminal_size()?;
     let mut editor = Editor::new(
         &mut data_store,
-        stdout,
+        writer,
         width as usize,
         height as usize);
     editor.init();
