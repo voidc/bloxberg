@@ -158,30 +158,30 @@ impl<'d, W: Write> Editor<'d, W> {
         &mut self.cells[self.lines[line_idx].cell_range()]
     }
 
-    fn cell_index_at_col(&self, line_idx: usize, col: usize) -> Option<usize> {
-        let idx = self.lines[line_idx].col_to_offset(col);
-        Some(self.cells.get(idx)?.base_offset())
+    fn cell_index_at_col(&self, line_idx: usize, col: usize) -> usize {
+        let idx = min(self.lines[line_idx].col_to_offset(col), self.cells.len() - 1);
+        self.cells[idx].base_offset()
     }
 
     fn cell_index_at_cursor(&self) -> usize {
-        self.cell_index_at_col(self.cursor_y, self.cursor_x).unwrap()
+        self.cell_index_at_col(self.cursor_y, self.cursor_x)
     }
 
-    fn cell_at_col(&self, line_idx: usize, col: usize) -> Option<&Cell> {
-        Some(&self.cells[self.cell_index_at_col(line_idx, col)?])
+    fn cell_at_col(&self, line_idx: usize, col: usize) -> &Cell {
+        &self.cells[self.cell_index_at_col(line_idx, col)]
     }
 
-    fn cell_at_col_mut(&mut self, line_idx: usize, col: usize) -> Option<&mut Cell> {
-        let idx = self.cell_index_at_col(line_idx, col)?;
-        Some(&mut self.cells[idx])
+    fn cell_at_col_mut(&mut self, line_idx: usize, col: usize) -> &mut Cell {
+        let idx = self.cell_index_at_col(line_idx, col);
+        &mut self.cells[idx]
     }
 
     fn cell_at_cursor(&self) -> &Cell {
-        self.cell_at_col(self.cursor_y, self.cursor_x).unwrap()
+        self.cell_at_col(self.cursor_y, self.cursor_x)
     }
 
     fn cell_at_cursor_mut(&mut self) -> &mut Cell {
-        self.cell_at_col_mut(self.cursor_y, self.cursor_x).unwrap()
+        self.cell_at_col_mut(self.cursor_y, self.cursor_x)
     }
 
     pub fn move_cursor_next(&mut self) {
@@ -257,6 +257,10 @@ impl<'d, W: Write> Editor<'d, W> {
         self.cursor_offset = 0;
         self.cursor_x = x;
         self.cursor_y = y;
+
+        if x >= self.lines[y].len * self.lines[y].cpb {
+            self.cursor_x = self.lines[y].len * self.lines[y].cpb - 1;
+        }
 
         if y < self.scroll {
             self.scroll = y;
