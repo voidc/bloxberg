@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use crate::util::cmp_range;
 use std::ops::Range;
 use crate::data_store::DataStore;
+use crate::disasm::DisasmView;
 
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
@@ -90,6 +91,7 @@ pub struct Editor<'d, W: Write> {
     cmd_buf: String,
     pub finished: bool,
     dirty: bool,
+    disasm_view: DisasmView,
 }
 
 impl<'d, W: Write> Editor<'d, W> {
@@ -125,6 +127,7 @@ impl<'d, W: Write> Editor<'d, W> {
             cmd_buf: String::new(),
             finished: false,
             dirty: false,
+            disasm_view: DisasmView::new(),
         }
     }
 
@@ -478,12 +481,18 @@ impl<'d, W: Write> Editor<'d, W> {
 
     pub fn type_cmd(&mut self, c: char) {
         if c == '\n' {
-            match &self.cmd_buf[..] {
+            let mut cmd = self.cmd_buf.splitn(2, ' ');
+            match cmd.next().unwrap() {
                 "w" => {
                     self.data_store.write();
                     self.dirty = false
                 },
                 "q" => self.finished = true,
+                "d" => {
+                    let addr = self.cell_at_cursor().offset;
+                    let count = cmd.next().unwrap().parse::<usize>().unwrap();
+                    self.disasm_view.disassemble(addr, count, self.data_store.data());
+                }
                 cmd => {
                     if let Ok(offset) = usize::from_str_radix(cmd, 16) {
                         self.set_cursor_offset(offset).unwrap();
@@ -675,6 +684,24 @@ impl<'d, W: Write> Editor<'d, W> {
                 eprintln!("Line {:x}: len={} offset={}", i, self.lines[i].len, offset - self.lines[i].offset)
             }
             //self.draw_line_ascii(self.lines[i].cell_range());
+
+            if self.disasm_view.is_enabled() {
+                let cursor_offset = self.cell_at_cursor().offset;
+                let relative_scroll = i as isize - self.cursor_y as isize;
+                if let Some(insn) = self.disasm_view.get(cursor_offset, relative_scroll) {
+                    if self.cursor_y == i {
+                        self.write(format_args!(" {}{}{}",
+                                                termion::color::Fg(termion::color::LightBlue),
+                                                insn,
+                                                termion::color::Fg(termion::color::Reset),
+                        ));
+                    } else {
+                        self.write(format_args!(" {}", insn));
+                    }
+
+                }
+            }
+
             self.write(format_args!("{}", termion::clear::UntilNewline));
 
             i += 1;

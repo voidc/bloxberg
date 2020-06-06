@@ -12,6 +12,7 @@ use crate::data_store::DataStore;
 mod data_store;
 mod editor;
 mod cell;
+mod disasm;
 mod util;
 
 fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>) {
