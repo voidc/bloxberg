@@ -34,22 +34,8 @@ enum Buddy {
 }
 
 impl Line {
-    fn new(
-        offset: usize,
-        len: usize,
-        cpb: usize,
-        min_cpb: usize,
-        buddy: Buddy,
-        level: usize,
-    ) -> Self {
-        Line {
-            offset,
-            len,
-            cpb,
-            min_cpb,
-            buddy,
-            level,
-        }
+    fn new(offset: usize, len: usize) -> Self {
+        Line { offset, len, cpb: 1, min_cpb: 1, buddy: Buddy::None, level: 0 }
     }
 
     fn cell_range(&self) -> Range<usize> {
@@ -107,7 +93,7 @@ impl<'d, W: Write> Editor<'d, W> {
         let n_bytes = data_store.data().len();
         let cells = SparseCells::new(n_bytes);
         let lines = (0..n_bytes).step_by(n_cols)
-            .map(|c| Line::new(c, min(n_cols, n_bytes - c), 1, 1, Buddy::None, 0))
+            .map(|c| Line::new(c, min(n_cols, n_bytes - c)))
             .collect::<Vec<Line>>();
 
         Editor {
@@ -328,7 +314,7 @@ impl<'d, W: Write> Editor<'d, W> {
 
             line.cpb *= 2;
             let len = self.n_cols / line.cpb;
-            let mut new_line = Line::new(line.offset + len, line.len - len, line.cpb, line.min_cpb, line.buddy, line.level);
+            let mut new_line = Line { offset: line.offset + len, len: line.len - len, ..*line };
             line.len = len; // new_line.len < len for last (underfull) line
             if offset < new_line.offset {
                 line.buddy = Buddy::Below;
