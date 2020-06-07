@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 use std::ops::Range;
+use std::collections::HashMap;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Format {
@@ -211,5 +212,33 @@ impl Cell {
                 }
             }
         }
+    }
+}
+
+pub struct SparseCells {
+    map: HashMap<usize, Cell>,
+    len: usize,
+}
+
+impl SparseCells {
+    pub fn new(len: usize) -> Self {
+        SparseCells {
+            map: HashMap::default(),
+            len,
+        }
+    }
+
+    pub fn get(&self, index: usize) -> Cell {
+        assert!(index < self.len);
+        self.map.get(&index).cloned().unwrap_or_else(|| Cell::new_hex(index))
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> &mut Cell {
+        assert!(index < self.len);
+        self.map.entry(index).or_insert_with(|| Cell::new_hex(index))
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
     }
 }

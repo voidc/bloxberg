@@ -9,7 +9,6 @@ use crate::util::cmp_range;
 use std::ops::Range;
 use crate::data_store::DataStore;
 use crate::disasm::DisasmView;
-use std::collections::HashMap;
 
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
@@ -70,34 +69,6 @@ impl Line {
     }
 }
 
-struct Cells {
-    map: HashMap<usize, Cell>,
-    len: usize,
-}
-
-impl Cells {
-    fn new(len: usize) -> Self {
-        Cells {
-            map: HashMap::default(),
-            len,
-        }
-    }
-
-    fn get(&self, index: usize) -> Cell {
-        assert!(index < self.len);
-        self.map.get(&index).cloned().unwrap_or_else(|| Cell::new_hex(index))
-    }
-
-    fn get_mut(&mut self, index: usize) -> &mut Cell {
-        assert!(index < self.len);
-        self.map.entry(index).or_insert_with(|| Cell::new_hex(index))
-    }
-
-    fn len(&self) -> usize {
-        self.len
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum EditorMode {
     Normal,
@@ -115,7 +86,7 @@ pub struct Editor<'d, W: Write> {
     cursor_x: usize,
     cursor_y: usize,
     cursor_offset: usize,
-    cells: Cells,
+    cells: SparseCells,
     lines: Vec<Line>,
     cmd_buf: String,
     pub finished: bool,
@@ -134,7 +105,7 @@ impl<'d, W: Write> Editor<'d, W> {
         };
 
         let n_bytes = data_store.data().len();
-        let cells = Cells::new(n_bytes);
+        let cells = SparseCells::new(n_bytes);
         let lines = (0..n_bytes).step_by(n_cols)
             .map(|c| Line::new(c, min(n_cols, n_bytes - c), 1, 1, Buddy::None, 0))
             .collect::<Vec<Line>>();
