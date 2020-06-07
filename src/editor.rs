@@ -9,6 +9,7 @@ use crate::util::cmp_range;
 use std::ops::Range;
 use crate::data_store::DataStore;
 use crate::disasm::DisasmView;
+use std::collections::HashMap;
 
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
@@ -69,6 +70,34 @@ impl Line {
     }
 }
 
+struct Cells {
+    map: HashMap<usize, Cell>,
+    len: usize,
+}
+
+impl Cells {
+    fn new(len: usize) -> Self {
+        Cells {
+            map: HashMap::default(),
+            len,
+        }
+    }
+
+    fn get(&self, index: usize) -> Cell {
+        assert!(index < self.len);
+        self.map.get(&index).cloned().unwrap_or_else(|| Cell::new_hex(index))
+    }
+
+    fn get_mut(&mut self, index: usize) -> &mut Cell {
+        assert!(index < self.len);
+        self.map.entry(index).or_insert_with(|| Cell::new_hex(index))
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum EditorMode {
     Normal,
@@ -86,7 +115,7 @@ pub struct Editor<'d, W: Write> {
     cursor_x: usize,
     cursor_y: usize,
     cursor_offset: usize,
-    cells: Vec<Cell>,
+    cells: Cells,
     lines: Vec<Line>,
     cmd_buf: String,
     pub finished: bool,
@@ -105,11 +134,9 @@ impl<'d, W: Write> Editor<'d, W> {
         };
 
         let n_bytes = data_store.data().len();
-        let cells = (0..n_bytes)
-            .map(|i| Cell::new_hex(i))
-            .collect::<Vec<Cell>>();
-        let lines = cells.chunks(n_cols)
-            .map(|c| Line::new(c[0].offset, c.len(), 1, 1, Buddy::None, 0))
+        let cells = Cells::new(n_bytes);
+        let lines = (0..n_bytes).step_by(n_cols)
+            .map(|c| Line::new(c, min(n_cols, n_bytes - c), 1, 1, Buddy::None, 0))
             .collect::<Vec<Line>>();
 
         Editor {
@@ -153,33 +180,24 @@ impl<'d, W: Write> Editor<'d, W> {
         self.writer.borrow_mut().write_fmt(args).unwrap();
     }
 
-    fn cells(&self, line_idx: usize) -> &[Cell] {
-        &self.cells[self.lines[line_idx].cell_range()]
-    }
-
-    fn cells_mut(&mut self, line_idx: usize) -> &mut [Cell] {
-        &mut self.cells[self.lines[line_idx].cell_range()]
-    }
-
     fn cell_index_at_col(&self, line_idx: usize, col: usize) -> usize {
         let idx = min(self.lines[line_idx].col_to_offset(col), self.cells.len() - 1);
-        self.cells[idx].base_offset()
+        self.cells.get(idx).base_offset()
     }
 
     fn cell_index_at_cursor(&self) -> usize {
         self.cell_index_at_col(self.cursor_y, self.cursor_x)
     }
 
-    fn cell_at_col(&self, line_idx: usize, col: usize) -> &Cell {
-        &self.cells[self.cell_index_at_col(line_idx, col)]
+    fn cell_at_col(&self, line_idx: usize, col: usize) -> Cell {
+        self.cells.get(self.cell_index_at_col(line_idx, col))
     }
 
     fn cell_at_col_mut(&mut self, line_idx: usize, col: usize) -> &mut Cell {
-        let idx = self.cell_index_at_col(line_idx, col);
-        &mut self.cells[idx]
+        self.cells.get_mut(self.cell_index_at_col(line_idx, col))
     }
 
-    fn cell_at_cursor(&self) -> &Cell {
+    fn cell_at_cursor(&self) -> Cell {
         self.cell_at_col(self.cursor_y, self.cursor_x)
     }
 
@@ -214,7 +232,7 @@ impl<'d, W: Write> Editor<'d, W> {
             return;
         }
 
-        let mut new_cell_idx = self.cells[cell.offset - 1].base_offset();
+        let mut new_cell_idx = self.cells.get(cell.offset - 1).base_offset();
         let mut new_y = self.cursor_y;
 
         if new_cell_idx < line.offset {
@@ -301,7 +319,7 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     pub fn set_format(&mut self, format: Format) {
-        let cell = self.cell_at_cursor().clone();
+        let cell = self.cell_at_cursor();
         if cell.format == format || cell.n_bytes() * format.cols_per_byte() > self.n_cols {
             return;
         }
@@ -322,11 +340,11 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     fn max_cpb_cell(&self, line_idx: usize) -> Cell {
-         self.cells(line_idx).iter()
+        let line_range = self.lines[line_idx].cell_range();
+        line_range.map(|i| self.cells.get(i))
             .filter(|c| c.offset == c.base_offset())
             .max_by_key(|c| c.format.cols_per_byte())
             .unwrap()
-            .clone()
     }
 
     fn split_line(&mut self, line_idx: usize, offset: usize, min_cpb: usize) {
@@ -421,7 +439,7 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     pub fn set_width(&mut self, width: Width) {
-        let old_cell = self.cell_at_cursor().clone();
+        let old_cell = self.cell_at_cursor();
         if old_cell.width == width || width.n_bytes() * old_cell.format.cols_per_byte() > self.n_cols {
             return;
         }
@@ -429,7 +447,8 @@ impl<'d, W: Write> Editor<'d, W> {
         let offset = width.align(old_cell.offset);
         let n_bytes = max(width.n_bytes(), old_cell.n_bytes());
 
-        for cell in self.cells[offset..(offset + n_bytes)].iter_mut() {
+        for i in offset..(offset + n_bytes) {
+            let cell = self.cells.get_mut(i);
             cell.width = width;
             cell.format = old_cell.format;
             cell.byte_order = old_cell.byte_order;
@@ -437,7 +456,7 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     pub fn insert(&mut self, c: char) {
-        let cell = self.cell_at_cursor().clone();
+        let cell = self.cell_at_cursor();
         let digit = if let Some(d) = cell.format.parse_char(c) { d } else { return };
         if let Format::UDec | Format::SDec = cell.format { return } // unimplemented
 
@@ -669,7 +688,7 @@ impl<'d, W: Write> Editor<'d, W> {
                 assert_eq!(self.lines[i].offset_to_col(offset), col);
                 assert_eq!(self.lines[i].col_to_offset(col), offset);
 
-                let cell = self.cells[offset];
+                let cell = self.cells.get(offset);
                 let n_cols = max(cell.n_cols(), self.lines[i].cpb * cell.n_bytes());
                 let selected = self.cursor_y == i && col <= self.cursor_x && self.cursor_x < col + n_cols;
                 col += n_cols;
