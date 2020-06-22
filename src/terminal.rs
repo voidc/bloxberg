@@ -1,6 +1,6 @@
-use std::io::Write;
 use std::cell::RefCell;
 use std::fmt;
+use std::io::Write;
 
 pub enum Color {
     Selected,
@@ -58,9 +58,11 @@ impl<W: Write> Terminal<W> {
     }
 
     pub fn reset_color(&self) {
-        write!(self, "{}{}",
-                                termion::color::Bg(termion::color::Reset),
-                                termion::color::Fg(termion::color::Reset),
+        write!(
+            self,
+            "{}{}",
+            termion::color::Bg(termion::color::Reset),
+            termion::color::Fg(termion::color::Reset),
         );
     }
 
@@ -73,10 +75,13 @@ impl<W: Write> Terminal<W> {
 
 impl<W: Write> Drop for Terminal<W> {
     fn drop(&mut self) {
-        write!(self, "{}{}{}",
-                                termion::clear::All,
-                                termion::cursor::Goto(1, 1),
-                                termion::cursor::Show);
+        write!(
+            self,
+            "{}{}{}",
+            termion::clear::All,
+            termion::cursor::Goto(1, 1),
+            termion::cursor::Show
+        );
         self.flush();
     }
 }

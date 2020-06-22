@@ -1,6 +1,6 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ops::Range;
-use std::collections::HashMap;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Format {
@@ -55,7 +55,8 @@ impl Format {
             Format::Oct => c.to_digit(8),
             Format::Bin => c.to_digit(2),
             Format::Char => Some(c as u32),
-        }.map(|x| x as u8)
+        }
+        .map(|x| x as u8)
     }
 }
 
@@ -157,7 +158,7 @@ impl Cell {
     }
 
     pub fn byte_range(&self) -> Range<usize> {
-        self.offset..(self.offset+self.n_bytes())
+        self.offset..(self.offset + self.n_bytes())
     }
 
     pub fn n_cols(&self) -> usize {
@@ -170,47 +171,39 @@ impl Cell {
 
     pub fn parse_value(&self, data: &[u8]) -> u128 {
         match self.byte_order {
-            ByteOrder::LittleEndian => {
-                match self.width {
-                    Width::Byte8 => u8::from_le_bytes(data[..1].try_into().unwrap()).into(),
-                    Width::HWord16 => u16::from_le_bytes(data[..2].try_into().unwrap()).into(),
-                    Width::Word32 => u32::from_le_bytes(data[..4].try_into().unwrap()).into(),
-                    Width::DWord64 => u64::from_le_bytes(data[..8].try_into().unwrap()).into(),
-                    Width::QWord128 => u128::from_le_bytes(data[..16].try_into().unwrap()).into(),
-                }
+            ByteOrder::LittleEndian => match self.width {
+                Width::Byte8 => u8::from_le_bytes(data[..1].try_into().unwrap()).into(),
+                Width::HWord16 => u16::from_le_bytes(data[..2].try_into().unwrap()).into(),
+                Width::Word32 => u32::from_le_bytes(data[..4].try_into().unwrap()).into(),
+                Width::DWord64 => u64::from_le_bytes(data[..8].try_into().unwrap()).into(),
+                Width::QWord128 => u128::from_le_bytes(data[..16].try_into().unwrap()).into(),
             },
-            ByteOrder::BigEndian => {
-                match self.width {
-                    Width::Byte8 => u8::from_be_bytes(data[..1].try_into().unwrap()).into(),
-                    Width::HWord16 => u16::from_be_bytes(data[..2].try_into().unwrap()).into(),
-                    Width::Word32 => u32::from_be_bytes(data[..4].try_into().unwrap()).into(),
-                    Width::DWord64 => u64::from_be_bytes(data[..8].try_into().unwrap()).into(),
-                    Width::QWord128 => u128::from_be_bytes(data[..16].try_into().unwrap()).into(),
-                }
-            }
+            ByteOrder::BigEndian => match self.width {
+                Width::Byte8 => u8::from_be_bytes(data[..1].try_into().unwrap()).into(),
+                Width::HWord16 => u16::from_be_bytes(data[..2].try_into().unwrap()).into(),
+                Width::Word32 => u32::from_be_bytes(data[..4].try_into().unwrap()).into(),
+                Width::DWord64 => u64::from_be_bytes(data[..8].try_into().unwrap()).into(),
+                Width::QWord128 => u128::from_be_bytes(data[..16].try_into().unwrap()).into(),
+            },
         }
     }
 
     pub fn parse_value_signed(&self, data: &[u8]) -> i128 {
         match self.byte_order {
-            ByteOrder::LittleEndian => {
-                match self.width {
-                    Width::Byte8 => i8::from_le_bytes(data[..1].try_into().unwrap()).into(),
-                    Width::HWord16 => i16::from_le_bytes(data[..2].try_into().unwrap()).into(),
-                    Width::Word32 => i32::from_le_bytes(data[..4].try_into().unwrap()).into(),
-                    Width::DWord64 => i64::from_le_bytes(data[..8].try_into().unwrap()).into(),
-                    Width::QWord128 => i128::from_le_bytes(data[..16].try_into().unwrap()).into(),
-                }
+            ByteOrder::LittleEndian => match self.width {
+                Width::Byte8 => i8::from_le_bytes(data[..1].try_into().unwrap()).into(),
+                Width::HWord16 => i16::from_le_bytes(data[..2].try_into().unwrap()).into(),
+                Width::Word32 => i32::from_le_bytes(data[..4].try_into().unwrap()).into(),
+                Width::DWord64 => i64::from_le_bytes(data[..8].try_into().unwrap()).into(),
+                Width::QWord128 => i128::from_le_bytes(data[..16].try_into().unwrap()).into(),
             },
-            ByteOrder::BigEndian => {
-                match self.width {
-                    Width::Byte8 => i8::from_be_bytes(data[..1].try_into().unwrap()).into(),
-                    Width::HWord16 => i16::from_be_bytes(data[..2].try_into().unwrap()).into(),
-                    Width::Word32 => i32::from_be_bytes(data[..4].try_into().unwrap()).into(),
-                    Width::DWord64 => i64::from_be_bytes(data[..8].try_into().unwrap()).into(),
-                    Width::QWord128 => i128::from_be_bytes(data[..16].try_into().unwrap()).into(),
-                }
-            }
+            ByteOrder::BigEndian => match self.width {
+                Width::Byte8 => i8::from_be_bytes(data[..1].try_into().unwrap()).into(),
+                Width::HWord16 => i16::from_be_bytes(data[..2].try_into().unwrap()).into(),
+                Width::Word32 => i32::from_be_bytes(data[..4].try_into().unwrap()).into(),
+                Width::DWord64 => i64::from_be_bytes(data[..8].try_into().unwrap()).into(),
+                Width::QWord128 => i128::from_be_bytes(data[..16].try_into().unwrap()).into(),
+            },
         }
     }
 }
@@ -230,12 +223,17 @@ impl SparseCells {
 
     pub fn get(&self, index: usize) -> Cell {
         assert!(index < self.len);
-        self.map.get(&index).cloned().unwrap_or_else(|| Cell::new_hex(index))
+        self.map
+            .get(&index)
+            .cloned()
+            .unwrap_or_else(|| Cell::new_hex(index))
     }
 
     pub fn get_mut(&mut self, index: usize) -> &mut Cell {
         assert!(index < self.len);
-        self.map.entry(index).or_insert_with(|| Cell::new_hex(index))
+        self.map
+            .entry(index)
+            .or_insert_with(|| Cell::new_hex(index))
     }
 
     pub fn len(&self) -> usize {

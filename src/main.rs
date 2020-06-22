@@ -1,20 +1,20 @@
-use std::{io, env};
-use std::io::{stdin, stdout, Write, BufWriter};
-use termion::event::{Key, Event, MouseEvent, MouseButton};
-use termion::input::{TermRead, MouseTerminal};
-use termion::raw::IntoRawMode;
 use std::fs::OpenOptions;
+use std::io::{stdin, stdout, BufWriter, Write};
+use std::{env, io};
+use termion::event::{Event, Key, MouseButton, MouseEvent};
+use termion::input::{MouseTerminal, TermRead};
+use termion::raw::IntoRawMode;
 
 use crate::cell::{Format, Width};
-use crate::editor::*;
 use crate::data_store::DataStore;
+use crate::editor::*;
 
 mod data_store;
 #[macro_use]
 mod terminal;
-mod editor;
 mod cell;
 mod disasm;
+mod editor;
 mod util;
 
 fn handle_key<W: Write>(key: Key, editor: &mut Editor<W>) {
@@ -58,7 +58,7 @@ fn handle_mouse<W: Write>(me: MouseEvent, editor: &mut Editor<W>) {
     match me {
         MouseEvent::Press(MouseButton::WheelUp, _, _) => editor.scroll(-1),
         MouseEvent::Press(MouseButton::WheelDown, _, _) => editor.scroll(1),
-        _ => {},
+        _ => {}
     }
 }
 
@@ -82,11 +82,7 @@ fn main() -> Result<(), io::Error> {
     let stdout: MouseTerminal<_> = stdout().into_raw_mode()?.into();
     let mut writer = BufWriter::new(stdout);
     let (width, height) = termion::terminal_size()?;
-    let mut editor = Editor::new(
-        &mut data_store,
-        writer,
-        width as usize,
-        height as usize);
+    let mut editor = Editor::new(&mut data_store, writer, width as usize, height as usize);
     editor.init();
 
     let stdin = stdin();
@@ -94,7 +90,7 @@ fn main() -> Result<(), io::Error> {
         match evt? {
             Event::Key(key) => handle_key(key, &mut editor),
             Event::Mouse(me) => handle_mouse(me, &mut editor),
-            _ => {},
+            _ => {}
         }
 
         if editor.finished {

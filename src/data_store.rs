@@ -1,7 +1,7 @@
+use memmap::{MmapMut, MmapOptions};
+use std::fs::File;
 use std::io;
 use std::io::Write;
-use std::fs::File;
-use memmap::{MmapOptions, MmapMut};
 
 pub enum DataStore {
     File(MmapMut, File),
@@ -38,8 +38,8 @@ impl DataStore {
             DataStore::File(mmap, file) => {
                 file.write_all(mmap)?;
                 file.flush()?;
-            },
-            _ => {},
+            }
+            _ => {}
         }
         Ok(())
     }

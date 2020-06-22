@@ -1,14 +1,14 @@
-use std::*;
 use std::io::Write;
+use std::*;
 
-use std::cmp::{min, max};
+use std::cmp::{max, min};
 
 use crate::cell::*;
-use crate::util::cmp_range;
-use std::ops::Range;
 use crate::data_store::DataStore;
 use crate::disasm::DisasmView;
-use crate::terminal::{Terminal, Color};
+use crate::terminal::{Color, Terminal};
+use crate::util::cmp_range;
+use std::ops::Range;
 
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
@@ -35,11 +35,18 @@ enum Buddy {
 
 impl Line {
     fn new(offset: usize, len: usize) -> Self {
-        Line { offset, len, cpb: 1, min_cpb: 1, buddy: Buddy::None, level: 0 }
+        Line {
+            offset,
+            len,
+            cpb: 1,
+            min_cpb: 1,
+            buddy: Buddy::None,
+            level: 0,
+        }
     }
 
     fn cell_range(&self) -> Range<usize> {
-        self.offset..self.offset+self.len
+        self.offset..self.offset + self.len
     }
 
     fn col_to_offset(&self, col: usize) -> usize {
@@ -92,7 +99,8 @@ impl<'d, W: Write> Editor<'d, W> {
 
         let n_bytes = data_store.data().len();
         let cells = SparseCells::new(n_bytes);
-        let lines = (0..n_bytes).step_by(n_cols)
+        let lines = (0..n_bytes)
+            .step_by(n_cols)
             .map(|c| Line::new(c, min(n_cols, n_bytes - c)))
             .collect::<Vec<Line>>();
 
@@ -134,7 +142,10 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     fn cell_index_at_col(&self, line_idx: usize, col: usize) -> usize {
-        let idx = min(self.lines[line_idx].col_to_offset(col), self.cells.len() - 1);
+        let idx = min(
+            self.lines[line_idx].col_to_offset(col),
+            self.cells.len() - 1,
+        );
         self.cells.get(idx).base_offset()
     }
 
@@ -213,9 +224,9 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     pub fn set_cursor_offset(&mut self, offset: usize) -> Result<(), usize> {
-        let line_idx = self.lines.binary_search_by(|line| {
-            cmp_range(offset, line.cell_range()).reverse()
-        })?;
+        let line_idx = self
+            .lines
+            .binary_search_by(|line| cmp_range(offset, line.cell_range()).reverse())?;
         let col = self.lines[line_idx].offset_to_col(offset);
         self.set_cursor(col, line_idx);
         Ok(())
@@ -223,7 +234,11 @@ impl<'d, W: Write> Editor<'d, W> {
 
     pub fn set_cursor_end(&mut self) {
         let y = self.lines.len() - 1;
-        let x = self.lines.last().unwrap().offset_to_col(self.cells.len() - 1);
+        let x = self
+            .lines
+            .last()
+            .unwrap()
+            .offset_to_col(self.cells.len() - 1);
         self.set_cursor(x, y);
     }
 
@@ -294,7 +309,8 @@ impl<'d, W: Write> Editor<'d, W> {
 
     fn max_cpb_cell(&self, line_idx: usize) -> Cell {
         let line_range = self.lines[line_idx].cell_range();
-        line_range.map(|i| self.cells.get(i))
+        line_range
+            .map(|i| self.cells.get(i))
             .filter(|c| c.offset == c.base_offset())
             .max_by_key(|c| c.format.cols_per_byte())
             .unwrap()
@@ -310,14 +326,19 @@ impl<'d, W: Write> Editor<'d, W> {
 
             line.cpb *= 2;
             let len = self.n_cols / line.cpb;
-            let mut new_line = Line { offset: line.offset + len, len: line.len - len, ..*line };
+            let mut new_line = Line {
+                offset: line.offset + len,
+                len: line.len - len,
+                ..*line
+            };
             line.len = len; // new_line.len < len for last (underfull) line
             if offset < new_line.offset {
                 line.buddy = Buddy::Below;
                 line.level += 1;
                 self.lines.insert(line_idx + 1, new_line);
                 self.split_line(line_idx, offset, min_cpb);
-                self.lines[line_idx + 1].min_cpb = self.max_cpb_cell(line_idx + 1).format.cols_per_byte();
+                self.lines[line_idx + 1].min_cpb =
+                    self.max_cpb_cell(line_idx + 1).format.cols_per_byte();
             } else {
                 new_line.buddy = Buddy::Above;
                 new_line.level += 1;
@@ -344,12 +365,13 @@ impl<'d, W: Write> Editor<'d, W> {
                         assert!(buddy.len * buddy.cpb <= self.n_cols); // == except last line
                         self.lines.remove(line_idx);
                         self.merge_lines(line_idx - 1);
-                    } else if buddy.level < line.level { // only swap with higher level lines
+                    } else if buddy.level < line.level {
+                        // only swap with higher level lines
                         let bb = buddy.buddy;
                         buddy.buddy = Buddy::Below;
                         self.lines[line_idx].buddy = bb;
                     }
-                },
+                }
                 Buddy::Below => {
                     let buddy = self.lines[line_idx + 1].clone();
                     let line = &mut self.lines[line_idx];
@@ -367,13 +389,13 @@ impl<'d, W: Write> Editor<'d, W> {
                         line.buddy = buddy.buddy;
                         self.lines[line_idx + 1].buddy = Buddy::Above;
                     }
-                },
+                }
                 Buddy::None => {
                     // assert_eq!(line_idx, self.lines.len() - 1); // may only occur in last line
                     // let line = &mut self.lines[line_idx];
                     // line.cpb = line.min_cpb;
                     // assert!(line.len * line.cpb <= self.n_cols);
-                },
+                }
             }
         }
     }
@@ -393,7 +415,9 @@ impl<'d, W: Write> Editor<'d, W> {
 
     pub fn set_width(&mut self, width: Width) {
         let old_cell = self.cell_at_cursor();
-        if old_cell.width == width || width.n_bytes() * old_cell.format.cols_per_byte() > self.n_cols {
+        if old_cell.width == width
+            || width.n_bytes() * old_cell.format.cols_per_byte() > self.n_cols
+        {
             return;
         }
 
@@ -410,8 +434,14 @@ impl<'d, W: Write> Editor<'d, W> {
 
     pub fn insert(&mut self, c: char) {
         let cell = self.cell_at_cursor();
-        let digit = if let Some(d) = cell.format.parse_char(c) { d } else { return };
-        if let Format::UDec | Format::SDec = cell.format { return } // unimplemented
+        let digit = if let Some(d) = cell.format.parse_char(c) {
+            d
+        } else {
+            return;
+        };
+        if let Format::UDec | Format::SDec = cell.format {
+            return;
+        } // unimplemented
 
         let data = self.data_store.data_mut();
         let cpb = cell.format.chars_per_byte();
@@ -423,9 +453,9 @@ impl<'d, W: Write> Editor<'d, W> {
             let old = data[cell.offset + byte_idx];
             let pos = (cpb - self.cursor_offset % cpb - 1) as u8;
             data[cell.offset + byte_idx] = match cell.format {
-                Format::Hex => (old & !(0x0f << pos*4)) | (digit << pos*4),
-                Format::Oct => (old & !(0x07 << pos*3)) | (digit << pos*3),
-                Format::Bin => (old & !(0x01 << pos*1)) | (digit << pos*1),
+                Format::Hex => (old & !(0x0f << pos * 4)) | (digit << pos * 4),
+                Format::Oct => (old & !(0x07 << pos * 3)) | (digit << pos * 3),
+                Format::Bin => (old & !(0x01 << pos * 1)) | (digit << pos * 1),
                 Format::Char => digit,
                 _ => unimplemented!(),
             };
@@ -458,12 +488,13 @@ impl<'d, W: Write> Editor<'d, W> {
                 "w" => {
                     self.data_store.write();
                     self.dirty = false
-                },
+                }
                 "q" => self.finished = true,
                 "d" => {
                     let addr = self.cell_at_cursor().offset;
                     let count = cmd.next().unwrap().parse::<usize>().unwrap();
-                    self.disasm_view.disassemble(addr, count, self.data_store.data());
+                    self.disasm_view
+                        .disassemble(addr, count, self.data_store.data());
                 }
                 cmd => {
                     if let Ok(offset) = usize::from_str_radix(cmd, 16) {
@@ -471,7 +502,7 @@ impl<'d, W: Write> Editor<'d, W> {
                     } else {
                         eprintln!("Unknown Command: \"{}\"", cmd)
                     }
-                },
+                }
             }
             self.cmd_buf.clear();
             self.mode = EditorMode::Normal;
@@ -483,20 +514,23 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     fn draw_status_bar(&self) {
-        self.terminal.goto(1, 1 + (PADDING_TOP + self.height) as u16);
+        self.terminal
+            .goto(1, 1 + (PADDING_TOP + self.height) as u16);
         if self.mode == EditorMode::Command {
             write!(self.terminal, ":{}", self.cmd_buf);
         } else {
             let cell = self.cell_at_cursor();
-            write!(self.terminal, "{:?} ({}, {}) {:#018x} {:?} {:?} {:?} {}%",
-                                    self.mode,
-                                    self.cursor_x,
-                                    self.cursor_y,
-                                    cell.offset,
-                                    cell.format,
-                                    cell.width,
-                                    cell.byte_order,
-                                    self.cursor_y * 100 / self.lines.len() as usize,
+            write!(
+                self.terminal,
+                "{:?} ({}, {}) {:#018x} {:?} {:?} {:?} {}%",
+                self.mode,
+                self.cursor_x,
+                self.cursor_y,
+                cell.offset,
+                cell.format,
+                cell.width,
+                cell.byte_order,
+                self.cursor_y * 100 / self.lines.len() as usize,
             );
         }
         self.terminal.clear_line();
@@ -510,8 +544,8 @@ impl<'d, W: Write> Editor<'d, W> {
             '\x07' => '␇', // bell
             '\x08' => '␈', // backspace
             '\x1b' => '␛', // escape
-            '\t' => '↹', // tab
-            _ => '•', // space
+            '\t' => '↹',   // tab
+            _ => '•',      // space
         }
     }
 
@@ -552,7 +586,12 @@ impl<'d, W: Write> Editor<'d, W> {
                 write!(self.terminal, "{:>1$}", value, cell_width);
             }
             Format::SDec => {
-                write!(self.terminal, "{:>1$}", cell.parse_value_signed(data), cell_width);
+                write!(
+                    self.terminal,
+                    "{:>1$}",
+                    cell.parse_value_signed(data),
+                    cell_width
+                );
             }
             Format::Oct => {
                 let w = 4 * cell.n_bytes();
@@ -563,7 +602,12 @@ impl<'d, W: Write> Editor<'d, W> {
                 write!(self.terminal, "{1:2$}{:03$b}", value, "", cell_width - w, w);
             }
             Format::Char => {
-                write!(self.terminal, "{:>1$}", value_char.unwrap_or('.'), cell_width);
+                write!(
+                    self.terminal,
+                    "{:>1$}",
+                    value_char.unwrap_or('.'),
+                    cell_width
+                );
             }
         }
 
@@ -576,7 +620,14 @@ impl<'d, W: Write> Editor<'d, W> {
         let cpb = self.lines[self.cursor_y].cpb;
         for i in 0..(self.n_cols / cpb) {
             if self.cursor_x / cpb == i {
-                write_color!(self.terminal, Color::Selected, " {1:2$}{:02x}", i, "", (cpb - 1) * 3);
+                write_color!(
+                    self.terminal,
+                    Color::Selected,
+                    " {1:2$}{:02x}",
+                    i,
+                    "",
+                    (cpb - 1) * 3
+                );
             } else {
                 write!(self.terminal, " {1:2$}{:02x}", i, "", (cpb - 1) * 3);
             }
@@ -606,7 +657,8 @@ impl<'d, W: Write> Editor<'d, W> {
         while i < min(self.lines.len(), self.scroll + self.height) {
             assert!(self.lines[i].cell_range().end > offset);
 
-            self.terminal.goto(1, 1 + (PADDING_TOP + i - self.scroll) as u16);
+            self.terminal
+                .goto(1, 1 + (PADDING_TOP + i - self.scroll) as u16);
             self.draw_offset(i, offset);
 
             /*
@@ -631,7 +683,8 @@ impl<'d, W: Write> Editor<'d, W> {
 
                 let cell = self.cells.get(offset);
                 let n_cols = max(cell.n_cols(), self.lines[i].cpb * cell.n_bytes());
-                let selected = self.cursor_y == i && col <= self.cursor_x && self.cursor_x < col + n_cols;
+                let selected =
+                    self.cursor_y == i && col <= self.cursor_x && self.cursor_x < col + n_cols;
                 col += n_cols;
 
                 assert!(col <= self.n_cols);
@@ -641,7 +694,12 @@ impl<'d, W: Write> Editor<'d, W> {
             }
 
             if self.lines[i].len != offset - self.lines[i].offset {
-                eprintln!("Line {:x}: len={} offset={}", i, self.lines[i].len, offset - self.lines[i].offset)
+                eprintln!(
+                    "Line {:x}: len={} offset={}",
+                    i,
+                    self.lines[i].len,
+                    offset - self.lines[i].offset
+                )
             }
             //self.draw_line_ascii(self.lines[i].cell_range());
 
@@ -654,7 +712,6 @@ impl<'d, W: Write> Editor<'d, W> {
                     } else {
                         write!(self.terminal, " {}", insn);
                     }
-
                 }
             }
 
