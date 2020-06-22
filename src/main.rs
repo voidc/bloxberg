@@ -10,6 +10,7 @@ use crate::editor::*;
 use crate::data_store::DataStore;
 
 mod data_store;
+#[macro_use]
 mod terminal;
 mod editor;
 mod cell;

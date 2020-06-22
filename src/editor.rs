@@ -485,10 +485,10 @@ impl<'d, W: Write> Editor<'d, W> {
     fn draw_status_bar(&self) {
         self.terminal.goto(1, 1 + (PADDING_TOP + self.height) as u16);
         if self.mode == EditorMode::Command {
-            self.terminal.write(format_args!(":{}", self.cmd_buf));
+            write!(self.terminal, ":{}", self.cmd_buf);
         } else {
             let cell = self.cell_at_cursor();
-            self.terminal.write(format_args!("{:?} ({}, {}) {:#018x} {:?} {:?} {:?} {}%",
+            write!(self.terminal, "{:?} ({}, {}) {:#018x} {:?} {:?} {:?} {}%",
                                     self.mode,
                                     self.cursor_x,
                                     self.cursor_y,
@@ -497,7 +497,7 @@ impl<'d, W: Write> Editor<'d, W> {
                                     cell.width,
                                     cell.byte_order,
                                     self.cursor_y * 100 / self.lines.len() as usize,
-            ));
+            );
         }
         self.terminal.clear_line();
     }
@@ -527,7 +527,7 @@ impl<'d, W: Write> Editor<'d, W> {
 
         let data = &self.data_store.data()[cell.offset..];
         assert!(data.len() >= cell.n_bytes());
-        self.terminal.write(format_args!(" "));
+        write!(self.terminal, " ");
 
         if selected {
             self.terminal.bg_color(Color::Selected);
@@ -546,24 +546,24 @@ impl<'d, W: Write> Editor<'d, W> {
         match cell.format {
             Format::Hex => {
                 let w = 2 * cell.n_bytes();
-                self.terminal.write(format_args!("{1:2$}{:03$x}", value, "", cell_width - w, w));
+                write!(self.terminal, "{1:2$}{:03$x}", value, "", cell_width - w, w);
             }
             Format::UDec => {
-                self.terminal.write(format_args!("{:>1$}", value, cell_width));
+                write!(self.terminal, "{:>1$}", value, cell_width);
             }
             Format::SDec => {
-                self.terminal.write(format_args!("{:>1$}", cell.parse_value_signed(data), cell_width));
+                write!(self.terminal, "{:>1$}", cell.parse_value_signed(data), cell_width);
             }
             Format::Oct => {
                 let w = 4 * cell.n_bytes();
-                self.terminal.write(format_args!("{1:2$}{:03$o}", value, "", cell_width - w, w));
+                write!(self.terminal, "{1:2$}{:03$o}", value, "", cell_width - w, w);
             }
             Format::Bin => {
                 let w = 8 * cell.n_bytes();
-                self.terminal.write(format_args!("{1:2$}{:03$b}", value, "", cell_width - w, w));
+                write!(self.terminal, "{1:2$}{:03$b}", value, "", cell_width - w, w);
             }
             Format::Char => {
-                self.terminal.write(format_args!("{:>1$}", value_char.unwrap_or('.'), cell_width));
+                write!(self.terminal, "{:>1$}", value_char.unwrap_or('.'), cell_width);
             }
         }
 
@@ -572,15 +572,13 @@ impl<'d, W: Write> Editor<'d, W> {
 
     fn draw_header(&self, padding: usize) {
         self.terminal.goto(1, 1);
-        self.terminal.write(format_args!("{0:1$}", "", padding));
+        write!(self.terminal, "{0:1$}", "", padding);
         let cpb = self.lines[self.cursor_y].cpb;
         for i in 0..(self.n_cols / cpb) {
             if self.cursor_x / cpb == i {
-                self.terminal.write_color(Color::Selected, format_args!(" {1:2$}{:02x}",
-                                        i, "", (cpb - 1) * 3,
-                ));
+                write_color!(self.terminal, Color::Selected, " {1:2$}{:02x}", i, "", (cpb - 1) * 3);
             } else {
-                self.terminal.write(format_args!(" {1:2$}{:02x}", i, "", (cpb - 1) * 3));
+                write!(self.terminal, " {1:2$}{:02x}", i, "", (cpb - 1) * 3);
             }
         }
         self.terminal.clear_line();
@@ -588,15 +586,15 @@ impl<'d, W: Write> Editor<'d, W> {
 
     fn draw_offset(&self, line_idx: usize, offset: usize) {
         if line_idx == self.cursor_y {
-            self.terminal.write_color(Color::Selected, format_args!("{:#018x}", offset));
+            write_color!(self.terminal, Color::Selected, "{:#018x}", offset);
         } else {
-            self.terminal.write(format_args!("{:#018x}", offset));
+            write!(self.terminal, "{:#018x}", offset);
         }
     }
 
     fn draw_line_ascii(&self, range: Range<usize>) {
         let data = &self.data_store.data()[range];
-        self.terminal.write(format_args!(" {}", String::from_utf8_lossy(data)));
+        write!(self.terminal, " {}", String::from_utf8_lossy(data));
     }
 
     pub fn draw(&mut self) {
@@ -617,11 +615,11 @@ impl<'d, W: Write> Editor<'d, W> {
                 Buddy::Below => "v",
                 Buddy::None => "-",
             };
-            self.terminal.write(format_args!(" {}{}{}{}",
+            write!(self.terminal, " {}{}{}{}",
                                     self.lines[i].min_cpb,
                                     self.lines[i].cpb,
                                     self.lines[i].level,
-                                    bi));
+                                    bi);
              */
 
             self.lines[i].offset = offset;
@@ -652,9 +650,9 @@ impl<'d, W: Write> Editor<'d, W> {
                 let relative_scroll = i as isize - self.cursor_y as isize;
                 if let Some(insn) = self.disasm_view.get(cursor_offset, relative_scroll) {
                     if self.cursor_y == i {
-                        self.terminal.write_color(Color::Selected, format_args!(" {}", insn));
+                        write_color!(self.terminal, Color::Selected, " {}", insn);
                     } else {
-                        self.terminal.write(format_args!(" {}", insn));
+                        write!(self.terminal, " {}", insn);
                     }
 
                 }
