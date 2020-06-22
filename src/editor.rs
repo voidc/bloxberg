@@ -4,11 +4,11 @@ use std::io::Write;
 use std::cmp::{min, max};
 
 use crate::cell::*;
-use std::cell::RefCell;
 use crate::util::cmp_range;
 use std::ops::Range;
 use crate::data_store::DataStore;
 use crate::disasm::DisasmView;
+use crate::terminal::{Terminal, Color};
 
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
@@ -64,7 +64,7 @@ pub enum EditorMode {
 
 pub struct Editor<'d, W: Write> {
     data_store: &'d mut DataStore,
-    writer: RefCell<W>,
+    terminal: Terminal<W>,
     pub height: usize,
     n_cols: usize,
     mode: EditorMode,
@@ -98,7 +98,7 @@ impl<'d, W: Write> Editor<'d, W> {
 
         Editor {
             data_store,
-            writer: RefCell::new(writer),
+            terminal: Terminal::new(writer),
             height: height - PADDING_TOP - PADDING_BOTTOM,
             n_cols,
             mode: EditorMode::Normal,
@@ -116,7 +116,7 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     pub fn init(&mut self) {
-        self.write(format_args!("{}{}", termion::clear::All, termion::cursor::Hide));
+        self.terminal.init();
         self.set_cursor(0, 0);
         self.draw();
     }
@@ -131,10 +131,6 @@ impl<'d, W: Write> Editor<'d, W> {
 
     pub fn is_ins(&self) -> bool {
         self.mode == EditorMode::Insert
-    }
-
-    pub fn write(&self, args: fmt::Arguments) {
-        self.writer.borrow_mut().write_fmt(args).unwrap();
     }
 
     fn cell_index_at_col(&self, line_idx: usize, col: usize) -> usize {
@@ -487,12 +483,12 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     fn draw_status_bar(&self) {
-        self.goto(1, 1 + (PADDING_TOP + self.height) as u16);
+        self.terminal.goto(1, 1 + (PADDING_TOP + self.height) as u16);
         if self.mode == EditorMode::Command {
-            self.write(format_args!(":{}", self.cmd_buf));
+            self.terminal.write(format_args!(":{}", self.cmd_buf));
         } else {
             let cell = self.cell_at_cursor();
-            self.write(format_args!("{:?} ({}, {}) {:#018x} {:?} {:?} {:?} {}%",
+            self.terminal.write(format_args!("{:?} ({}, {}) {:#018x} {:?} {:?} {:?} {}%",
                                     self.mode,
                                     self.cursor_x,
                                     self.cursor_y,
@@ -503,7 +499,7 @@ impl<'d, W: Write> Editor<'d, W> {
                                     self.cursor_y * 100 / self.lines.len() as usize,
             ));
         }
-        self.write(format_args!("{}", termion::clear::UntilNewline));
+        self.terminal.clear_line();
     }
 
     fn escape_non_printable(chr: char) -> char {
@@ -531,10 +527,10 @@ impl<'d, W: Write> Editor<'d, W> {
 
         let data = &self.data_store.data()[cell.offset..];
         assert!(data.len() >= cell.n_bytes());
-        self.write(format_args!(" "));
+        self.terminal.write(format_args!(" "));
 
         if selected {
-            self.write(format_args!("{}", termion::color::Bg(termion::color::LightBlue)));
+            self.terminal.bg_color(Color::Selected);
         }
 
         let cell_width = max(cell.n_cols(), min_cols) * 3 - 1;
@@ -542,75 +538,65 @@ impl<'d, W: Write> Editor<'d, W> {
         let value_char = value_to_char(value);
 
         if value == 0 {
-            self.write(format_args!("{}", termion::color::Fg(termion::color::LightBlack)));
+            self.terminal.fg_color(Color::Null);
         } else if value_char.is_some() {
-            self.write(format_args!("{}", termion::color::Fg(termion::color::Yellow)));
+            self.terminal.fg_color(Color::Ascii);
         }
 
         match cell.format {
             Format::Hex => {
                 let w = 2 * cell.n_bytes();
-                self.write(format_args!("{1:2$}{:03$x}", value, "", cell_width - w, w));
+                self.terminal.write(format_args!("{1:2$}{:03$x}", value, "", cell_width - w, w));
             }
             Format::UDec => {
-                self.write(format_args!("{:>1$}", value, cell_width));
+                self.terminal.write(format_args!("{:>1$}", value, cell_width));
             }
             Format::SDec => {
-                self.write(format_args!("{:>1$}", cell.parse_value_signed(data), cell_width));
+                self.terminal.write(format_args!("{:>1$}", cell.parse_value_signed(data), cell_width));
             }
             Format::Oct => {
                 let w = 4 * cell.n_bytes();
-                self.write(format_args!("{1:2$}{:03$o}", value, "", cell_width - w, w));
+                self.terminal.write(format_args!("{1:2$}{:03$o}", value, "", cell_width - w, w));
             }
             Format::Bin => {
                 let w = 8 * cell.n_bytes();
-                self.write(format_args!("{1:2$}{:03$b}", value, "", cell_width - w, w));
+                self.terminal.write(format_args!("{1:2$}{:03$b}", value, "", cell_width - w, w));
             }
             Format::Char => {
-                self.write(format_args!("{:>1$}", value_char.unwrap_or('.'), cell_width));
+                self.terminal.write(format_args!("{:>1$}", value_char.unwrap_or('.'), cell_width));
             }
         }
 
-        self.write(format_args!("{}{}",
-                                termion::color::Bg(termion::color::Reset),
-                                termion::color::Fg(termion::color::Reset),
-        ));
+        self.terminal.reset_color();
     }
 
     fn draw_header(&self, padding: usize) {
-        self.goto(1, 1);
-        self.write(format_args!("{0:1$}", "", padding));
+        self.terminal.goto(1, 1);
+        self.terminal.write(format_args!("{0:1$}", "", padding));
         let cpb = self.lines[self.cursor_y].cpb;
         for i in 0..(self.n_cols / cpb) {
             if self.cursor_x / cpb == i {
-                self.write(format_args!(" {}{3:4$}{:02x}{}",
-                                        termion::color::Fg(termion::color::LightBlue),
-                                        i,
-                                        termion::color::Fg(termion::color::Reset),
-                                        "", (cpb - 1) * 3,
+                self.terminal.write_color(Color::Selected, format_args!(" {1:2$}{:02x}",
+                                        i, "", (cpb - 1) * 3,
                 ));
             } else {
-                self.write(format_args!(" {1:2$}{:02x}", i, "", (cpb - 1) * 3));
+                self.terminal.write(format_args!(" {1:2$}{:02x}", i, "", (cpb - 1) * 3));
             }
         }
-        self.write(format_args!("{}", termion::clear::UntilNewline));
+        self.terminal.clear_line();
     }
 
     fn draw_offset(&self, line_idx: usize, offset: usize) {
         if line_idx == self.cursor_y {
-            self.write(format_args!("{}{:#018x}{}",
-                                    termion::color::Fg(termion::color::LightBlue),
-                                    offset,
-                                    termion::color::Fg(termion::color::Reset),
-            ));
+            self.terminal.write_color(Color::Selected, format_args!("{:#018x}", offset));
         } else {
-            self.write(format_args!("{:#018x}", offset));
+            self.terminal.write(format_args!("{:#018x}", offset));
         }
     }
 
     fn draw_line_ascii(&self, range: Range<usize>) {
         let data = &self.data_store.data()[range];
-        self.write(format_args!(" {}", String::from_utf8_lossy(data)));
+        self.terminal.write(format_args!(" {}", String::from_utf8_lossy(data)));
     }
 
     pub fn draw(&mut self) {
@@ -622,7 +608,7 @@ impl<'d, W: Write> Editor<'d, W> {
         while i < min(self.lines.len(), self.scroll + self.height) {
             assert!(self.lines[i].cell_range().end > offset);
 
-            self.goto(1, 1 + (PADDING_TOP + i - self.scroll) as u16);
+            self.terminal.goto(1, 1 + (PADDING_TOP + i - self.scroll) as u16);
             self.draw_offset(i, offset);
 
             /*
@@ -631,7 +617,7 @@ impl<'d, W: Write> Editor<'d, W> {
                 Buddy::Below => "v",
                 Buddy::None => "-",
             };
-            self.write(format_args!(" {}{}{}{}",
+            self.terminal.write(format_args!(" {}{}{}{}",
                                     self.lines[i].min_cpb,
                                     self.lines[i].cpb,
                                     self.lines[i].level,
@@ -666,42 +652,20 @@ impl<'d, W: Write> Editor<'d, W> {
                 let relative_scroll = i as isize - self.cursor_y as isize;
                 if let Some(insn) = self.disasm_view.get(cursor_offset, relative_scroll) {
                     if self.cursor_y == i {
-                        self.write(format_args!(" {}{}{}",
-                                                termion::color::Fg(termion::color::LightBlue),
-                                                insn,
-                                                termion::color::Fg(termion::color::Reset),
-                        ));
+                        self.terminal.write_color(Color::Selected, format_args!(" {}", insn));
                     } else {
-                        self.write(format_args!(" {}", insn));
+                        self.terminal.write(format_args!(" {}", insn));
                     }
 
                 }
             }
 
-            self.write(format_args!("{}", termion::clear::UntilNewline));
+            self.terminal.clear_line();
 
             i += 1;
         }
 
         self.draw_status_bar();
-        self.flush();
-    }
-
-    fn goto(&self, x: u16, y: u16) {
-        self.write(format_args!("{}", termion::cursor::Goto(x, y)));
-    }
-
-    fn flush(&self) {
-        self.writer.borrow_mut().flush().unwrap();
-    }
-}
-
-impl<W: Write> Drop for Editor<'_, W> {
-    fn drop(&mut self) {
-        self.write(format_args!("{}{}{}",
-                                termion::clear::All,
-                                termion::cursor::Goto(1, 1),
-                                termion::cursor::Show));
-        self.flush();
+        self.terminal.flush();
     }
 }
