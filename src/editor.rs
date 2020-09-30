@@ -12,9 +12,7 @@ use std::ops::Range;
 
 const PADDING_TOP: usize = 1;
 const PADDING_BOTTOM: usize = 1;
-#[cfg(target_pointer_width = "64")]
-const PADDING_LEFT: usize = 2 + 2 * 8;
-// const PADDING_LEFT: usize = 2 + 2 * Width::ADDRESS.n_bytes(); // requires const_if_match
+const PADDING_LEFT: usize = 2 + 2 * Width::ADDRESS.n_bytes();
 
 #[derive(Debug, Copy, Clone)]
 struct Line {

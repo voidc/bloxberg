@@ -13,7 +13,7 @@ pub enum Format {
 }
 
 impl Format {
-    pub fn cols_per_byte(&self) -> usize {
+    pub const fn cols_per_byte(&self) -> usize {
         match &self {
             Format::Hex | Format::Char => 1,
             Format::UDec | Format::SDec | Format::Oct => 2,
@@ -21,7 +21,7 @@ impl Format {
         }
     }
 
-    pub fn cycle(&self, rev: bool) -> Self {
+    pub const fn cycle(&self, rev: bool) -> Self {
         match self {
             Format::Hex if rev => Format::Char,
             Format::Hex => Format::UDec,
@@ -38,7 +38,7 @@ impl Format {
         }
     }
 
-    pub fn chars_per_byte(&self) -> usize {
+    pub const fn chars_per_byte(&self) -> usize {
         match &self {
             Format::Hex => 2,
             Format::UDec | Format::SDec => 3,
@@ -74,7 +74,7 @@ impl Width {
     #[cfg(target_pointer_width = "64")]
     pub const ADDRESS: Width = Width::DWord64;
 
-    pub fn n_bytes(&self) -> usize {
+    pub const fn n_bytes(&self) -> usize {
         match &self {
             Width::Byte8 => 1,
             Width::HWord16 => 2,
@@ -84,7 +84,7 @@ impl Width {
         }
     }
 
-    pub fn align(&self, n: usize) -> usize {
+    pub const fn align(&self, n: usize) -> usize {
         let shift = match &self {
             Width::Byte8 => 0,
             Width::HWord16 => 1,
@@ -95,7 +95,7 @@ impl Width {
         (n >> shift) << shift
     }
 
-    pub fn inc(&self) -> Self {
+    pub const fn inc(&self) -> Self {
         match self {
             Width::Byte8 => Width::HWord16,
             Width::HWord16 => Width::Word32,
@@ -105,7 +105,7 @@ impl Width {
         }
     }
 
-    pub fn dec(&self) -> Self {
+    pub const fn dec(&self) -> Self {
         match self {
             Width::Byte8 => Width::Byte8,
             Width::HWord16 => Width::Byte8,
@@ -123,7 +123,7 @@ pub enum ByteOrder {
 }
 
 impl ByteOrder {
-    pub fn toggle(&self) -> Self {
+    pub const fn toggle(&self) -> Self {
         match self {
             ByteOrder::LittleEndian => ByteOrder::BigEndian,
             ByteOrder::BigEndian => ByteOrder::LittleEndian,
@@ -140,7 +140,7 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub fn new(offset: usize, format: Format, width: Width, byte_order: ByteOrder) -> Self {
+    pub const fn new(offset: usize, format: Format, width: Width, byte_order: ByteOrder) -> Self {
         Cell {
             offset,
             format,
@@ -149,23 +149,23 @@ impl Cell {
         }
     }
 
-    pub fn new_hex(offset: usize) -> Self {
+    pub const fn new_hex(offset: usize) -> Self {
         Self::new(offset, Format::Hex, Width::Byte8, ByteOrder::LittleEndian)
     }
 
-    pub fn n_bytes(&self) -> usize {
+    pub const fn n_bytes(&self) -> usize {
         self.width.n_bytes()
     }
 
-    pub fn byte_range(&self) -> Range<usize> {
+    pub const fn byte_range(&self) -> Range<usize> {
         self.offset..(self.offset + self.n_bytes())
     }
 
-    pub fn n_cols(&self) -> usize {
+    pub const fn n_cols(&self) -> usize {
         self.format.cols_per_byte() * self.n_bytes()
     }
 
-    pub fn base_offset(&self) -> usize {
+    pub const fn base_offset(&self) -> usize {
         self.width.align(self.offset)
     }
 
