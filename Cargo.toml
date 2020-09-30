@@ -1,5 +1,5 @@
 [package]
-name = "ihex-rs"
+name = "bloxberg"
 version = "0.1.0"
 authors = ["Dominik Stolz <d.stolz@tum.de>"]
 edition = "2018"
