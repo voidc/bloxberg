@@ -80,7 +80,7 @@ fn main() -> Result<(), io::Error> {
     };
 
     let stdout: MouseTerminal<_> = stdout().into_raw_mode()?.into();
-    let mut writer = BufWriter::new(stdout);
+    let writer = BufWriter::new(stdout);
     let (width, height) = termion::terminal_size()?;
     let mut editor = Editor::new(&mut data_store, writer, width as usize, height as usize);
     editor.init();

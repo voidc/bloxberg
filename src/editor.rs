@@ -484,7 +484,7 @@ impl<'d, W: Write> Editor<'d, W> {
             let mut cmd = self.cmd_buf.splitn(2, ' ');
             match cmd.next().unwrap() {
                 "w" => {
-                    self.data_store.write();
+                    self.data_store.write().unwrap();
                     self.dirty = false
                 }
                 "q" => self.finished = true,
