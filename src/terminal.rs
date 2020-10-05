@@ -2,18 +2,23 @@ use std::cell::RefCell;
 use std::fmt;
 use std::io::Write;
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Color {
+    Default,
     Selected,
     Null,
     Ascii,
+    Cursor,
 }
 
 impl Color {
     fn termion(&self) -> &'static dyn termion::color::Color {
         match self {
+            Color::Default => &termion::color::Reset,
             Color::Selected => &termion::color::LightBlue,
             Color::Null => &termion::color::LightBlack,
             Color::Ascii => &termion::color::Yellow,
+            Color::Cursor => &termion::color::LightGreen,
         }
     }
 }
