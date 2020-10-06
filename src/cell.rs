@@ -44,7 +44,7 @@ impl Format {
         match &self {
             Format::Hex => 2,
             Format::UDec | Format::SDec => 3,
-            Format::Oct => 4,
+            Format::Oct => 3,
             Format::Bin => 8,
             Format::Char => 1,
         }
@@ -56,7 +56,7 @@ impl Format {
             Format::UDec | Format::SDec => 10,
             Format::Oct => 8,
             Format::Bin => 2,
-            Format::Char => 1,
+            Format::Char => 256,
         }
     }
 
