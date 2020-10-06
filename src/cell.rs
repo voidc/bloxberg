@@ -1,6 +1,8 @@
+use std::char;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ops::Range;
+use std::{cmp, fmt};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Format {
@@ -44,6 +46,16 @@ impl Format {
             Format::UDec | Format::SDec => 3,
             Format::Oct => 4,
             Format::Bin => 8,
+            Format::Char => 1,
+        }
+    }
+
+    pub const fn radix(&self) -> usize {
+        match &self {
+            Format::Hex => 16,
+            Format::UDec | Format::SDec => 10,
+            Format::Oct => 8,
+            Format::Bin => 2,
             Format::Char => 1,
         }
     }
@@ -165,6 +177,10 @@ impl Cell {
         self.format.cols_per_byte() * self.n_bytes()
     }
 
+    pub const fn n_chars(&self) -> usize {
+        self.format.chars_per_byte() * self.n_bytes()
+    }
+
     pub const fn base_offset(&self) -> usize {
         self.width.align(self.offset)
     }
@@ -188,22 +204,87 @@ impl Cell {
         }
     }
 
-    pub fn parse_value_signed(&self, data: &[u8]) -> i128 {
-        match self.byte_order {
-            ByteOrder::LittleEndian => match self.width {
-                Width::Byte8 => i8::from_le_bytes(data[..1].try_into().unwrap()).into(),
-                Width::HWord16 => i16::from_le_bytes(data[..2].try_into().unwrap()).into(),
-                Width::Word32 => i32::from_le_bytes(data[..4].try_into().unwrap()).into(),
-                Width::DWord64 => i64::from_le_bytes(data[..8].try_into().unwrap()).into(),
-                Width::QWord128 => i128::from_le_bytes(data[..16].try_into().unwrap()).into(),
-            },
-            ByteOrder::BigEndian => match self.width {
-                Width::Byte8 => i8::from_be_bytes(data[..1].try_into().unwrap()).into(),
-                Width::HWord16 => i16::from_be_bytes(data[..2].try_into().unwrap()).into(),
-                Width::Word32 => i32::from_be_bytes(data[..4].try_into().unwrap()).into(),
-                Width::DWord64 => i64::from_be_bytes(data[..8].try_into().unwrap()).into(),
-                Width::QWord128 => i128::from_be_bytes(data[..16].try_into().unwrap()).into(),
-            },
+    pub const fn format(&self, value: u128) -> CellValue {
+        CellValue { cell: *self, value }
+    }
+
+    pub const fn supports_cursor(&self) -> bool {
+        match self.format {
+            Format::Hex | Format::Oct | Format::Bin => true,
+            _ => false,
+        }
+    }
+}
+
+pub struct CellValue {
+    cell: Cell,
+    value: u128,
+}
+
+impl fmt::Display for CellValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let CellValue { cell, value } = &self;
+        let cell_width = f.width().unwrap_or_else(|| cell.n_cols() * 3 - 1);
+        let w = cmp::min(cell.n_chars(), cell_width);
+
+        match self.cell.format {
+            Format::Hex => write!(f, "{1:2$}{:03$x}", value, "", cell_width - w, w),
+            Format::UDec => write!(f, "{:>1$}", value, cell_width),
+            Format::SDec => write!(f, "{:>1$}", *value as i128, cell_width),
+            Format::Oct => write!(f, "{1:2$}{:03$o}", value, "", cell_width - w, w),
+            Format::Bin => write!(f, "{1:2$}{:03$b}", value, "", cell_width - w, w),
+            Format::Char => {
+                let value_char = self.value_to_char().unwrap_or('.');
+                write!(f, "{:>1$}", value_char, cell_width)
+            }
+        }
+    }
+}
+
+impl CellValue {
+    pub fn split(&self, offset: usize) -> (Option<CellValue>, CellValue, Option<CellValue>) {
+        let CellValue { cell, value } = *self;
+        let w = cell.n_chars();
+        let r = cell.format.radix() as u128;
+        let x = r.trailing_zeros() as usize; // log2 (HEX: 4, OCT: 3, BIN: 1)
+        let s = x * (w - offset - 1);
+
+        let prefix = if offset > 0 {
+            let value = self.value >> (s + x);
+            Some(CellValue { cell, value })
+        } else {
+            None
+        };
+
+        let cursor = {
+            let value = (value >> s) & (r - 1);
+            CellValue { cell, value }
+        };
+
+        let suffix = if w - offset - 1 > 0 {
+            let value = value & ((1 << s) - 1);
+            Some(CellValue { cell, value })
+        } else {
+            None
+        };
+
+        (prefix, cursor, suffix)
+    }
+
+    pub fn is_ascii(&self) -> bool {
+        self.value_to_char().is_some()
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.value == 0
+    }
+
+    fn value_to_char(&self) -> Option<char> {
+        let c = char::from_u32(self.value as u32)?;
+        if c.is_ascii() && !c.is_ascii_control() {
+            Some(c)
+        } else {
+            None
         }
     }
 }

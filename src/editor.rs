@@ -548,15 +548,6 @@ impl<'d, W: Write> Editor<'d, W> {
     }
 
     fn draw_cell(&self, cell: &Cell, selected: bool, min_cols: usize) {
-        fn value_to_char(value: u128) -> Option<char> {
-            let c = char::from_u32(value as u32)?;
-            if c.is_ascii() && !c.is_ascii_control() {
-                Some(c)
-            } else {
-                None
-            }
-        }
-
         let data = &self.data_store.data()[cell.offset..];
         assert!(data.len() >= cell.n_bytes());
         write!(self.terminal, " ");
@@ -566,111 +557,35 @@ impl<'d, W: Write> Editor<'d, W> {
         }
 
         let cell_width = max(cell.n_cols(), min_cols) * 3 - 1;
-        let value = cell.parse_value(data);
-        let value_char = value_to_char(value);
+        let value = cell.format(cell.parse_value(data));
 
-        let fg_color = if value == 0 {
+        let fg_color = if value.is_null() {
             Color::Null
-        } else if value_char.is_some() {
+        } else if value.is_ascii() {
             Color::Ascii
         } else {
             Color::Default
         };
-
         self.terminal.fg_color(fg_color);
 
-        match cell.format {
-            Format::Hex if selected && self.is_ins() => {
-                let w = 2 * cell.n_bytes();
-                let s = 4 * (w - self.cursor_offset - 1);
+        if cell.supports_cursor() && selected && self.is_ins() {
+            let (pre, cur, suf) = value.split(self.cursor_offset);
+            let w = cell.n_chars();
 
-                write!(self.terminal, "{:1$}", "", cell_width - w);
-                if self.cursor_offset > 0 {
-                    let prefix = value >> (s + 4);
-                    write!(self.terminal, "{:01$x}", prefix, self.cursor_offset);
-                }
+            write!(self.terminal, "{:1$}", "", cell_width - w);
+            if let Some(pre) = pre {
+                write!(self.terminal, "{:1$}", pre, self.cursor_offset);
+            }
 
-                let cursor = 0xf & (value >> s);
-                self.terminal.fg_color(Color::Cursor);
-                write!(self.terminal, "{:01$x}", cursor, 1);
-                self.terminal.fg_color(fg_color);
+            self.terminal.fg_color(Color::Cursor);
+            write!(self.terminal, "{:1$}", cur, 1);
+            self.terminal.fg_color(fg_color);
 
-                if w - self.cursor_offset - 1 > 0 {
-                    let suffix = value & ((1 << s) - 1);
-                    write!(self.terminal, "{:01$x}", suffix, w - self.cursor_offset - 1);
-                }
+            if let Some(suf) = suf {
+                write!(self.terminal, "{:1$}", suf, w - self.cursor_offset - 1);
             }
-            Format::Hex => {
-                let w = 2 * cell.n_bytes();
-                write!(self.terminal, "{1:2$}{:03$x}", value, "", cell_width - w, w);
-            }
-            Format::UDec => {
-                write!(self.terminal, "{:>1$}", value, cell_width);
-            }
-            Format::SDec => {
-                write!(
-                    self.terminal,
-                    "{:>1$}",
-                    cell.parse_value_signed(data),
-                    cell_width
-                );
-            }
-            Format::Oct if selected && self.is_ins() => {
-                let w = 4 * cell.n_bytes();
-                let s = 3 * (w - self.cursor_offset - 1);
-
-                write!(self.terminal, "{:1$}", "", cell_width - w);
-                if self.cursor_offset > 0 {
-                    let prefix = value >> (s + 3);
-                    write!(self.terminal, "{:01$o}", prefix, self.cursor_offset);
-                }
-
-                let cursor = 1 & (value >> s);
-                self.terminal.fg_color(Color::Cursor);
-                write!(self.terminal, "{:01$o}", cursor, 1);
-                self.terminal.fg_color(fg_color);
-
-                if w - self.cursor_offset - 1 > 0 {
-                    let suffix = value & ((1 << s) - 1);
-                    write!(self.terminal, "{:01$o}", suffix, w - self.cursor_offset - 1);
-                }
-            }
-            Format::Oct => {
-                let w = 4 * cell.n_bytes();
-                write!(self.terminal, "{1:2$}{:03$o}", value, "", cell_width - w, w);
-            }
-            Format::Bin if selected && self.is_ins() => {
-                let w = 8 * cell.n_bytes();
-                let s = 1 * (w - self.cursor_offset - 1);
-
-                write!(self.terminal, "{:1$}", "", cell_width - w);
-                if self.cursor_offset > 0 {
-                    let prefix = value >> (s + 1);
-                    write!(self.terminal, "{:01$b}", prefix, self.cursor_offset);
-                }
-
-                let cursor = 1 & (value >> s);
-                self.terminal.fg_color(Color::Cursor);
-                write!(self.terminal, "{:01$b}", cursor, 1);
-                self.terminal.fg_color(fg_color);
-
-                if w - self.cursor_offset - 1 > 0 {
-                    let suffix = value & ((1 << s) - 1);
-                    write!(self.terminal, "{:01$b}", suffix, w - self.cursor_offset - 1);
-                }
-            }
-            Format::Bin => {
-                let w = 8 * cell.n_bytes();
-                write!(self.terminal, "{1:2$}{:03$b}", value, "", cell_width - w, w);
-            }
-            Format::Char => {
-                write!(
-                    self.terminal,
-                    "{:>1$}",
-                    value_char.unwrap_or('.'),
-                    cell_width
-                );
-            }
+        } else {
+            write!(self.terminal, "{:1$}", value, cell_width);
         }
 
         self.terminal.reset_color();
