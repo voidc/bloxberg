@@ -1,3 +1,5 @@
+[![crates.io](https://img.shields.io/crates/v/bloxberg.svg)](https://crates.io/crates/bloxberg)
+
 Bloxberg
 ========
 
