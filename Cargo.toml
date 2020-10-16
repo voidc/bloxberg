@@ -2,6 +2,10 @@
 name = "bloxberg"
 version = "0.1.0"
 authors = ["Dominik Stolz <d.stolz@tum.de>"]
+license = "MIT"
+description = "Bloxberg is an experimental TUI-based hex editor written in Rust."
+repository = "https://github.com/voidc/bloxberg"
+categories = ["command-line-utilities", "development-tools"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
